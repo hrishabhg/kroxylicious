@@ -34,6 +34,7 @@ import io.netty.channel.ChannelPromise;
 import io.kroxylicious.proxy.authentication.ClientSaslContext;
 import io.kroxylicious.proxy.authentication.Subject;
 import io.kroxylicious.proxy.authentication.User;
+import io.kroxylicious.proxy.config.tls.Tls;
 import io.kroxylicious.proxy.filter.Filter;
 import io.kroxylicious.proxy.filter.FilterAndInvoker;
 import io.kroxylicious.proxy.filter.FilterContext;
@@ -72,6 +73,7 @@ public class FilterHandler extends ChannelDuplexHandler {
     private final FilterAndInvoker filterAndInvoker;
     private final ProxyChannelStateMachine proxyChannelStateMachine;
     private final ClientSubjectManager clientSubjectManager;
+    private final BackendTargetState backendTargetState;
     private CompletableFuture<Void> writeFuture = CompletableFuture.completedFuture(null);
     private CompletableFuture<Void> readFuture = CompletableFuture.completedFuture(null);
     private @Nullable ChannelHandlerContext ctx;
@@ -84,7 +86,8 @@ public class FilterHandler extends ChannelDuplexHandler {
                          VirtualClusterModel virtualClusterModel,
                          Channel inboundChannel,
                          ProxyChannelStateMachine proxyChannelStateMachine,
-                         ClientSubjectManager clientSubjectManager) {
+                         ClientSubjectManager clientSubjectManager,
+                         BackendTargetState backendTargetState) {
         this.filterAndInvoker = Objects.requireNonNull(filterAndInvoker);
         this.timeoutMs = Assertions.requireStrictlyPositive(timeoutMs, "timeout");
         this.sniHostname = sniHostname;
@@ -92,6 +95,7 @@ public class FilterHandler extends ChannelDuplexHandler {
         this.inboundChannel = inboundChannel;
         this.proxyChannelStateMachine = proxyChannelStateMachine;
         this.clientSubjectManager = clientSubjectManager;
+        this.backendTargetState = backendTargetState;
     }
 
     @Override
@@ -482,6 +486,27 @@ public class FilterHandler extends ChannelDuplexHandler {
         @Override
         public Subject authenticatedSubject() {
             return clientSubjectManager.authenticatedSubject();
+        }
+
+        @Override
+        public void setTarget(String bootstrapServers, @Nullable Tls tlsConfig) {
+            backendTargetState.setTarget(bootstrapServers, tlsConfig);
+        }
+
+        @Override
+        public Optional<Tls> targetTlsConfig() {
+            return backendTargetState.tlsConfig();
+        }
+
+        @Override
+        public String targetBootstrapServers() {
+            return backendTargetState.bootstrapServers()
+                    .orElseThrow(() -> new IllegalStateException("Backend target not yet selected for this connection"));
+        }
+
+        @Override
+        public boolean isTargetSelected() {
+            return backendTargetState.isSelected();
         }
 
         InternalFilterContext(DecodedFrame<?, ?> decodedFrame) {

@@ -8,6 +8,7 @@ package io.kroxylicious.proxy.internal;
 
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.function.Function;
 
@@ -144,6 +145,12 @@ public class ProxyChannelStateMachine {
      */
     private ProxyChannelState state = STARTING_STATE;
 
+    /**
+     * The backend target state for this connection, set once a filter has selected the backend target.
+     */
+    @Nullable
+    private BackendTargetState backendTargetState;
+
     /*
      * The netty autoread flag is volatile =>
      * expensive to set in every call to channelRead.
@@ -171,6 +178,13 @@ public class ProxyChannelStateMachine {
 
     ProxyChannelState state() {
         return state;
+    }
+
+    /**
+     * @return The backend target state for this connection, or empty if not yet initialized.
+     */
+    Optional<BackendTargetState> backendTargetState() {
+        return Optional.ofNullable(backendTargetState);
     }
 
     /**

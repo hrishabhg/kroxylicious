@@ -103,6 +103,7 @@ public class KafkaProxyFrontendHandler
     private boolean pendingReadComplete = true;
 
     private @Nullable ClientSubjectManager clientSubjectManager;
+    private @Nullable BackendTargetState backendTargetState;
     private int progressionLatch = -1;
 
     static {
@@ -276,6 +277,7 @@ public class KafkaProxyFrontendHandler
         clientChannel.config().setAutoRead(false);
         clientChannel.read();
         this.clientSubjectManager = new ClientSubjectManager();
+        this.backendTargetState = new BackendTargetState();
         this.progressionLatch = 2; // we require two events before unblocking
         if (!this.endpointBinding.endpointGateway().isUseTls()) {
             this.clientSubjectManager.subjectFromTransport(null, this.subjectBuilder, this::onTransportSubjectBuilt);
@@ -682,7 +684,8 @@ public class KafkaProxyFrontendHandler
                             virtualClusterModel,
                             inboundChannel,
                             proxyChannelStateMachine,
-                            clientSubjectManager));
+                            clientSubjectManager,
+                            Objects.requireNonNull(backendTargetState)));
         }
     }
 
