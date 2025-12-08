@@ -25,6 +25,7 @@ import org.apache.kafka.common.utils.ByteBufferOutputStream;
 
 import io.kroxylicious.proxy.authentication.ClientSaslContext;
 import io.kroxylicious.proxy.authentication.Subject;
+import io.kroxylicious.proxy.config.tls.Tls;
 import io.kroxylicious.proxy.filter.FilterContext;
 import io.kroxylicious.proxy.filter.RequestFilterResult;
 import io.kroxylicious.proxy.filter.ResponseFilterResult;
@@ -163,6 +164,26 @@ public record MockFilterContext(ApiMessage header, ApiMessage message, Subject s
     @Override
     public Subject authenticatedSubject() {
         return subject;
+    }
+
+    @Override
+    public void setTarget(String bootstrapServers, @Nullable Tls tlsConfig) {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public Optional<Tls> targetTlsConfig() {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public String targetBootstrapServers() {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public boolean isTargetSelected() {
+        return false;
     }
 
     record MockRequestFilterResult(boolean shortCircuitResponse,

@@ -55,6 +55,7 @@ public abstract class FilterHarness {
     public static final List<HostPort> TARGET_CLUSTER_BOOTSTRAP = List.of(HostPort.parse("targetCluster:9091"));
     protected EmbeddedChannel channel;
     protected ClientSubjectManager clientSubjectManager;
+    protected BackendTargetState backendState;
     private final AtomicInteger outboundCorrelationId = new AtomicInteger(1);
     private final Map<Integer, Correlation> pendingInternalRequestMap = new HashMap<>();
     private long timeoutMs = 1000L;
@@ -89,6 +90,7 @@ public abstract class FilterHarness {
         ProxyChannelStateMachine channelStateMachine = new ProxyChannelStateMachine(testVirtualCluster.getClusterName(), null);
 
         clientSubjectManager = new ClientSubjectManager();
+        backendState = new BackendTargetState();
         var filterHandlers = Arrays.stream(filters)
                 .collect(Collector.of(ArrayDeque<Filter>::new, ArrayDeque::addFirst, (d1, d2) -> {
                     d2.addAll(d1);
@@ -97,7 +99,8 @@ public abstract class FilterHarness {
                 .stream()
                 .map(f -> new FilterHandler(getOnlyElement(FilterAndInvoker.build(f.getClass().getSimpleName(), f)), timeoutMs, null, testVirtualCluster, inboundChannel,
                         channelStateMachine,
-                        clientSubjectManager))
+                        clientSubjectManager,
+                        backendState))
 
                 .map(ChannelHandler.class::cast);
         var handlers = Stream.concat(channelProcessors, filterHandlers);
