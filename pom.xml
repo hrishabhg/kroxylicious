@@ -602,7 +602,7 @@
                 <plugin>
                     <groupId>io.kroxylicious</groupId>
                     <artifactId>kroxylicious-krpc-plugin</artifactId>
-                    <version>0.18.0</version>
+                    <version>${project.version}</version>
                 </plugin>
                 <plugin>
                     <groupId>net.revelc.code.formatter</groupId>
