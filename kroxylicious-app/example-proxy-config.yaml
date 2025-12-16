@@ -11,7 +11,7 @@ management:
 virtualClusters:
   - name: demo
     targetCluster:
-      bootstrapServers: localhost:50443
+      bootstrapServers: localhost:9092
     gateways:
     - name: mygateway
       portIdentifiesNode:
