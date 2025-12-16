@@ -508,7 +508,7 @@ public class FilterHandler extends ChannelDuplexHandler {
             if (routingContext.isConnected()) {
                 throw new IllegalStateException("Cannot set target when already connected");
             }
-            routingContext.setTargetCluster(new TargetCluster(bootstrapServers, Optional.of(tlsConfig)));
+            routingContext.setTargetCluster(new TargetCluster(bootstrapServers, tlsConfig == null ? Optional.empty() : Optional.of(tlsConfig)));
         }
 
         @Override
