@@ -36,6 +36,7 @@ import io.kroxylicious.proxy.internal.codec.KafkaResponseEncoder;
 import io.kroxylicious.proxy.internal.filter.ApiVersionsDowngradeFilter;
 import io.kroxylicious.proxy.internal.filter.ApiVersionsIntersectFilter;
 import io.kroxylicious.proxy.internal.filter.BrokerAddressFilter;
+import io.kroxylicious.proxy.internal.filter.ClientRouter;
 import io.kroxylicious.proxy.internal.filter.EagerMetadataLearner;
 import io.kroxylicious.proxy.internal.filter.NettyFilterContext;
 import io.kroxylicious.proxy.internal.metrics.MetricEmittingKafkaMessageListener;
@@ -317,6 +318,7 @@ public class KafkaProxyInitializer extends ChannelInitializer<Channel> {
 
             NettyFilterContext filterContext = new NettyFilterContext(ch.eventLoop(), pfr);
             List<FilterAndInvoker> filterChain = filterChainFactory.createFilters(filterContext, filterDefinitions);
+            List<FilterAndInvoker> clientRouter = FilterAndInvoker.build("ClientRouter (internal)", new ClientRouter());
             List<FilterAndInvoker> brokerAddressFilters = FilterAndInvoker.build("BrokerAddress (internal)", new BrokerAddressFilter(gateway, endpointReconciler));
             // List<FilterAndInvoker> shortCircuitFilters = FilterAndInvoker.build("ShortCircuit (internal)", new ShortCircuitFilter());
             var filters = new ArrayList<>(apiVersionFilters);
@@ -327,6 +329,7 @@ public class KafkaProxyInitializer extends ChannelInitializer<Channel> {
             }
             // filters.addAll(shortCircuitFilters);
             filters.addAll(brokerAddressFilters);
+            filters.addAll(clientRouter);
             return filters;
         }
     }
