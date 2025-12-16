@@ -6,6 +6,7 @@
 
 package io.kroxylicious.proxy.internal.net;
 
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -26,7 +27,7 @@ public interface EndpointGateway {
      * Target cluster associated with this listener.
      * @return target cluster
      */
-    TargetCluster targetCluster();
+    List<TargetCluster> targetClusters();
 
     /**
      * true if this listener uses TLS.

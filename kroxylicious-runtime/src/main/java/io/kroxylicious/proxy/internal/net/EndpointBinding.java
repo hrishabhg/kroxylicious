@@ -6,7 +6,12 @@
 
 package io.kroxylicious.proxy.internal.net;
 
-import io.kroxylicious.proxy.service.HostPort;
+import java.util.List;
+
+import org.apache.kafka.common.protocol.ApiKeys;
+
+import io.kroxylicious.proxy.filter.FilterContext;
+import io.kroxylicious.proxy.service.ServiceEndpoint;
 
 import edu.umd.cs.findbugs.annotations.Nullable;
 
@@ -21,12 +26,14 @@ public interface EndpointBinding {
      */
     EndpointGateway endpointGateway();
 
+    List<ServiceEndpoint> upstreamServiceEndpoints(ApiKeys apiKey); // target specific to the filter context
+
     /**
-     * The upstream target of this binding.
+     * All upstream service endpoints for this binding. Connection manager will initialise connections to all of these.
      *
-     * @return upstream target.
+     * @return all upstream service endpoints.
      */
-    HostPort upstreamTarget();
+    List<ServiceEndpoint> allUpstreamServiceEndpoints(); // all targets
 
     /**
      * If set true, the upstream target must only be used for metadata discovery.

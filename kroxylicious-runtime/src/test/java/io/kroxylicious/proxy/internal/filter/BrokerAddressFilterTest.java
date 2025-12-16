@@ -7,6 +7,7 @@
 package io.kroxylicious.proxy.internal.filter;
 
 import java.io.IOException;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -104,7 +105,7 @@ class BrokerAddressFilterTest {
 
     @BeforeEach
     public void beforeEach() {
-        filter = new BrokerAddressFilter(virtualClusterListenerModel, endpointReconciler);
+        filter = new BrokerAddressFilter(virtualClusterListenerModel, endpointReconciler, new HashMap<String, Integer>());
         invoker = getOnlyElement(FilterAndInvoker.build(((Filter) filter).getClass().getSimpleName(), filter)).invoker();
         lenient().when(virtualClusterListenerModel.getBrokerAddress(0)).thenReturn(HostPort.parse("downstream:19199"));
         lenient().when(virtualClusterListenerModel.getAdvertisedBrokerAddress(0)).thenReturn(HostPort.parse("downstream:19200"));

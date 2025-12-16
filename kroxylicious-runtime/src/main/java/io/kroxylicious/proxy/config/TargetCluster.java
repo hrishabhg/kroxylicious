@@ -27,9 +27,11 @@ import edu.umd.cs.findbugs.annotations.Nullable;
  * @param tls tls configuration if a secure connection is to be used.
  * @param selectionStrategy The strategy used for selecting a bootstrap server when multiple servers are specified.
  */
-public record TargetCluster(@JsonProperty(value = "bootstrapServers", required = true) String bootstrapServers,
+public record TargetCluster(@JsonProperty(value = "name", required = false) String name,
+                            @JsonProperty(value = "bootstrapServers", required = true) String bootstrapServers,
                             @JsonProperty(value = "tls") Optional<Tls> tls,
-                            @Nullable @JsonProperty(value = "bootstrapServerSelection") BootstrapSelectionStrategy selectionStrategy) {
+                            @Nullable @JsonProperty(value = "bootstrapServerSelection") BootstrapSelectionStrategy selectionStrategy,
+                            @Nullable @JsonProperty(value = "index", required = false) Integer index) {
 
     private static final BootstrapSelectionStrategy DEFAULT_SELECTION_STRATEGY = new RoundRobinBootstrapSelectionStrategy();
 
@@ -41,7 +43,11 @@ public record TargetCluster(@JsonProperty(value = "bootstrapServers", required =
     }
 
     public TargetCluster(String bootstrapServers, @SuppressWarnings("OptionalUsedAsFieldOrParameterType") Optional<Tls> tls) {
-        this(bootstrapServers, tls, DEFAULT_SELECTION_STRATEGY);
+        this("default", bootstrapServers, tls, DEFAULT_SELECTION_STRATEGY, null);
+    }
+
+    public TargetCluster withIndex(int index) {
+        return new TargetCluster(name, bootstrapServers, tls, selectionStrategy, index);
     }
 
     /**

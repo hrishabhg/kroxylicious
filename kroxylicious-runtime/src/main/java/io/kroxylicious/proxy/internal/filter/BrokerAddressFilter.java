@@ -6,6 +6,7 @@
 package io.kroxylicious.proxy.internal.filter;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletionStage;
 import java.util.function.BiConsumer;
@@ -39,7 +40,7 @@ import io.kroxylicious.proxy.filter.ShareAcknowledgeResponseFilter;
 import io.kroxylicious.proxy.filter.ShareFetchResponseFilter;
 import io.kroxylicious.proxy.internal.net.EndpointGateway;
 import io.kroxylicious.proxy.internal.net.EndpointReconciler;
-import io.kroxylicious.proxy.service.HostPort;
+import io.kroxylicious.proxy.service.ServiceEndpoint;
 
 /**
  * An internal filter that rewrites broker addresses in all relevant responses to the corresponding proxy address. It also
@@ -50,19 +51,26 @@ public class BrokerAddressFilter implements MetadataResponseFilter, FindCoordina
 
     private static final Logger LOGGER = LoggerFactory.getLogger(BrokerAddressFilter.class);
 
-    private final EndpointGateway listenerModel;
+    // represents frontend listener
+    private final EndpointGateway endpointGateway;
     private final EndpointReconciler reconciler;
+    private final Map<String, Integer> clusterIdOffsets;
+    private final Map<String, String> brokerToClusterMap = new HashMap<>();
 
-    public BrokerAddressFilter(EndpointGateway listenerModel, EndpointReconciler reconciler) {
-        this.listenerModel = listenerModel;
+    public BrokerAddressFilter(EndpointGateway endpointGateway,
+                               EndpointReconciler reconciler,
+                               Map<String, Integer> clusterIdOffsets) {
+        this.endpointGateway = endpointGateway;
         this.reconciler = reconciler;
+        this.clusterIdOffsets = clusterIdOffsets; // to stay deterministic, we should pass in a ConcurrentMap here
     }
 
     @Override
     public CompletionStage<ResponseFilterResult> onMetadataResponse(short apiVersion, ResponseHeaderData header, MetadataResponseData data, FilterContext context) {
-        var nodeMap = new HashMap<Integer, HostPort>();
+        var nodeMap = new HashMap<Integer, List<ServiceEndpoint>>();
         for (MetadataResponseBroker broker : data.brokers()) {
-            nodeMap.put(broker.nodeId(), new HostPort(broker.host(), broker.port()));
+            nodeMap.put(broker.nodeId(), List.of(new ServiceEndpoint(broker.host(), broker.port(), null)));
+            brokerToClusterMap.put(broker.host() + ":" + broker.port(), data.clusterId());
             apply(context, broker, MetadataResponseBroker::nodeId, MetadataResponseBroker::host, MetadataResponseBroker::port, MetadataResponseBroker::setHost,
                     MetadataResponseBroker::setPort);
         }
@@ -72,9 +80,11 @@ public class BrokerAddressFilter implements MetadataResponseFilter, FindCoordina
     @Override
     public CompletionStage<ResponseFilterResult> onDescribeClusterResponse(short apiVersion, ResponseHeaderData header, DescribeClusterResponseData data,
                                                                            FilterContext context) {
-        var nodeMap = new HashMap<Integer, HostPort>();
+        var nodeMap = new HashMap<Integer, List<ServiceEndpoint>>();
         for (DescribeClusterBroker broker : data.brokers()) {
-            nodeMap.put(broker.brokerId(), new HostPort(broker.host(), broker.port()));
+            var serviceEndpoint = new ServiceEndpoint(broker.host(), broker.port(), null);
+            nodeMap.put(broker.brokerId(), List.of(serviceEndpoint));
+            brokerToClusterMap.put(broker.host() + ":" + broker.port(), data.clusterId());
             apply(context, broker, DescribeClusterBroker::brokerId, DescribeClusterBroker::host, DescribeClusterBroker::port, DescribeClusterBroker::setHost,
                     DescribeClusterBroker::setPort);
         }
@@ -166,7 +176,9 @@ public class BrokerAddressFilter implements MetadataResponseFilter, FindCoordina
         int incomingPort = portGetter.applyAsInt(broker);
 
         Integer nodeId = nodeIdGetter.apply(broker);
-        var advertisedAddress = listenerModel.getAdvertisedBrokerAddress(nodeId);
+        String clusterId = brokerToClusterMap.get(incomingHost + ":" + incomingPort);
+        int offset = getNodeIdOffset(clusterId);
+        var advertisedAddress = endpointGateway.getAdvertisedBrokerAddress(nodeId + offset);
 
         LOGGER.trace("{}: Rewriting broker address in response {}:{} -> {}", context, incomingHost, incomingPort, advertisedAddress);
         hostSetter.accept(broker, advertisedAddress.host());
@@ -174,11 +186,15 @@ public class BrokerAddressFilter implements MetadataResponseFilter, FindCoordina
     }
 
     private CompletionStage<ResponseFilterResult> doReconcileThenForwardResponse(ResponseHeaderData header, ApiMessage data, FilterContext context,
-                                                                                 Map<Integer, HostPort> nodeMap) {
-        return reconciler.reconcile(listenerModel, nodeMap).toCompletableFuture()
+                                                                                 Map<Integer, List<ServiceEndpoint>> nodeMap) {
+        return reconciler.reconcile(endpointGateway, nodeMap).toCompletableFuture()
                 .thenCompose(u -> {
-                    LOGGER.debug("Endpoint reconciliation complete for virtual cluster {}", listenerModel);
+                    LOGGER.debug("Endpoint reconciliation complete for virtual cluster {}", endpointGateway);
                     return context.responseFilterResultBuilder().forward(header, data).completed();
                 });
+    }
+
+    private Integer getNodeIdOffset(String clusterId) {
+        return clusterIdOffsets.getOrDefault(clusterId, 0);
     }
 }

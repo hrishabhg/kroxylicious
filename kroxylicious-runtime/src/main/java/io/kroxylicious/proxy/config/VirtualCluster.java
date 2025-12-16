@@ -5,6 +5,7 @@
  */
 package io.kroxylicious.proxy.config;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
@@ -19,7 +20,7 @@ import edu.umd.cs.findbugs.annotations.Nullable;
  * A virtual cluster.
  *
  * @param name virtual cluster name
- * @param targetCluster the cluster being proxied
+ * @param targetClusters the clusters being proxied
  * @param gateways virtual cluster gateways
  * @param logNetwork if true, network will be logged
  * @param logFrames if true, kafka rpcs will be logged
@@ -28,7 +29,7 @@ import edu.umd.cs.findbugs.annotations.Nullable;
  */
 @SuppressWarnings("java:S1123") // suppressing the spurious warning about missing @deprecated in javadoc. It is the field that is deprecated, not the class.
 public record VirtualCluster(@JsonProperty(required = true) String name,
-                             @JsonProperty(required = true) TargetCluster targetCluster,
+                             @JsonProperty(required = true) List<TargetCluster> targetClusters,
                              @JsonProperty(required = true) List<VirtualClusterGateway> gateways,
                              boolean logNetwork,
                              boolean logFrames,
@@ -40,7 +41,7 @@ public record VirtualCluster(@JsonProperty(required = true) String name,
     @SuppressWarnings("java:S2789") // S2789 - checking for null tls is the intent
     public VirtualCluster {
         Objects.requireNonNull(name);
-        Objects.requireNonNull(targetCluster);
+        Objects.requireNonNull(targetClusters);
         if (!isDnsLabel(name)) {
             throw new IllegalConfigurationException(
                     "Virtual cluster name '" + name + "' is invalid. It must be less than 64 characters long and match pattern " + DNS_LABEL_PATTERN.pattern()
@@ -53,15 +54,24 @@ public record VirtualCluster(@JsonProperty(required = true) String name,
             throw new IllegalConfigurationException("one or more gateways were null for virtual cluster '" + name + "'");
         }
         validateNoDuplicatedGatewayNames(gateways);
+        List<TargetCluster> targetClustersWithIndices = new ArrayList<>();
+        for (int i = 0; i < targetClusters.size(); i++) {
+            TargetCluster tc = targetClusters.get(i);
+            if (tc == null) {
+                throw new IllegalConfigurationException("one or more target clusters were null for virtual cluster '" + name + "'");
+            }
+            targetClustersWithIndices.add(tc.withIndex(i));
+        }
+        targetClusters = Collections.unmodifiableList(targetClustersWithIndices);
     }
 
     public VirtualCluster(@JsonProperty(required = true) String name,
-                          @JsonProperty(required = true) TargetCluster targetCluster,
+                          @JsonProperty(required = true) List<TargetCluster> targetClusters,
                           @JsonProperty(required = true) List<VirtualClusterGateway> gateways,
                           boolean logNetwork,
                           boolean logFrames,
                           @Nullable List<String> filters) {
-        this(name, targetCluster, gateways, logNetwork, logFrames, filters, null);
+        this(name, targetClusters, gateways, logNetwork, logFrames, filters, null);
     }
 
     boolean isDnsLabel(String name) {

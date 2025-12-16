@@ -7,11 +7,15 @@
 package io.kroxylicious.proxy.internal;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
+import java.util.Set;
 
 import org.apache.kafka.common.message.ApiVersionsRequestData;
 
 import io.netty.handler.codec.haproxy.HAProxyMessage;
+import io.netty.handler.ssl.SslContext;
 
 import io.kroxylicious.proxy.filter.NetFilter;
 import io.kroxylicious.proxy.frame.DecodedRequestFrame;
@@ -25,6 +29,7 @@ import static io.kroxylicious.proxy.internal.ProxyChannelState.Closed;
 import static io.kroxylicious.proxy.internal.ProxyChannelState.Connecting;
 import static io.kroxylicious.proxy.internal.ProxyChannelState.Forwarding;
 import static io.kroxylicious.proxy.internal.ProxyChannelState.HaProxy;
+import static io.kroxylicious.proxy.internal.ProxyChannelState.MultiClusterConnecting;
 import static io.kroxylicious.proxy.internal.ProxyChannelState.SelectingServer;
 import static io.kroxylicious.proxy.internal.ProxyChannelState.Startup;
 
@@ -38,6 +43,7 @@ sealed interface ProxyChannelState permits
         ApiVersions,
         SelectingServer,
         Connecting,
+        MultiClusterConnecting,
         Forwarding,
         Closed {
 
@@ -156,7 +162,7 @@ sealed interface ProxyChannelState permits
 
     /**
      * A channel to the server is now required, but
-     * {@link io.kroxylicious.proxy.filter.NetFilter#selectServer(NetFilter.NetFilterContext)}
+     * {@link io.kroxylicious.proxy.filter.NetFilter#selectServer(NetFilter.NetFilterContext, RoutingContextImpl)}
      * has not yet been called.
      * @param haProxyMessage
      * @param clientSoftwareName
@@ -173,9 +179,9 @@ sealed interface ProxyChannelState permits
          * {@link io.kroxylicious.proxy.filter.NetFilter.NetFilterContext#initiateConnect(HostPort, List)}.
          * @return The Connecting2 state
          */
-        public Connecting toConnecting(HostPort remote) {
+        public Connecting toConnecting(HostPort remote, Optional<SslContext> remoteSslContext) {
             return new Connecting(haProxyMessage, clientSoftwareName,
-                    clientSoftwareVersion, remote);
+                    clientSoftwareVersion, remote, remoteSslContext);
         }
     }
 
@@ -191,8 +197,16 @@ sealed interface ProxyChannelState permits
     record Connecting(@Nullable HAProxyMessage haProxyMessage,
                       @Nullable String clientSoftwareName,
                       @Nullable String clientSoftwareVersion,
-                      HostPort remote)
+                      HostPort remote,
+                      Optional<SslContext> remoteSslContext)
             implements ProxyChannelState {
+
+        Connecting(@Nullable HAProxyMessage haProxyMessage,
+                   @Nullable String clientSoftwareName,
+                   @Nullable String clientSoftwareVersion,
+                   HostPort remote) {
+            this(haProxyMessage, clientSoftwareName, clientSoftwareVersion, remote, Optional.empty());
+        }
 
         /**
          * Transition to {@link Forwarding}
@@ -277,6 +291,10 @@ sealed interface ProxyChannelState permits
      * The final state, where there are no connections to either client or server
      */
     record Closed() implements ProxyChannelState {
+
+    }
+
+    record MultiClusterConnecting(Map<String, HostPort> pendingConnections, Set<String> connectedBackends) implements ProxyChannelState {
 
     }
 

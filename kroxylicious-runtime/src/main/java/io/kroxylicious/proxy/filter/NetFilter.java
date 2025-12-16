@@ -7,8 +7,13 @@ package io.kroxylicious.proxy.filter;
 
 import java.net.SocketAddress;
 import java.util.List;
+import java.util.Optional;
 
+import io.netty.handler.ssl.SslContext;
+
+import io.kroxylicious.proxy.net.RoutingContext;
 import io.kroxylicious.proxy.service.HostPort;
+import io.kroxylicious.proxy.service.ServiceEndpoint;
 
 import edu.umd.cs.findbugs.annotations.Nullable;
 
@@ -21,10 +26,10 @@ public interface NetFilter {
     /**
      * Determine the upstream cluster to connect to based on the information
      * provided by the given {@code context},
-     * by invoking {@link NetFilterContext#initiateConnect(HostPort, List)}.
+     * by invoking {@link NetFilterContext#initiateConnect(List, List)}.
      * @param context The context.
      */
-    void selectServer(NetFilterContext context);
+    void selectServer(NetFilterContext context, FilterContext filterContext);
 
     default List<FilterAndInvoker> getFilterAndInvokerCollection() {
         return List.of();
@@ -84,11 +89,9 @@ public interface NetFilter {
          * Connect to the Kafka server at the given {@code host} and {@code port},
          * using the given protocol filters
          *
-         * @param target upstream broker target
+         * @param targets upstream broker/bootstrap target(s)
          * @param filters The filters
          */
-        void initiateConnect(HostPort target, List<FilterAndInvoker> filters);
-
-        // TODO add API for delayed responses
+        void initiateConnect(List<ServiceEndpoint> targets, List<FilterAndInvoker> filters);
     }
 }
