@@ -8,10 +8,12 @@ package io.kroxylicious.proxy.internal;
 
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 
 import org.apache.kafka.common.message.ApiVersionsRequestData;
 
 import io.netty.handler.codec.haproxy.HAProxyMessage;
+import io.netty.handler.ssl.SslContext;
 
 import io.kroxylicious.proxy.filter.NetFilter;
 import io.kroxylicious.proxy.frame.DecodedRequestFrame;
@@ -156,7 +158,7 @@ sealed interface ProxyChannelState permits
 
     /**
      * A channel to the server is now required, but
-     * {@link io.kroxylicious.proxy.filter.NetFilter#selectServer(NetFilter.NetFilterContext)}
+     * {@link io.kroxylicious.proxy.filter.NetFilter#selectServer(NetFilter.NetFilterContext, RoutingContext)}
      * has not yet been called.
      * @param haProxyMessage
      * @param clientSoftwareName
@@ -173,9 +175,9 @@ sealed interface ProxyChannelState permits
          * {@link io.kroxylicious.proxy.filter.NetFilter.NetFilterContext#initiateConnect(HostPort, List)}.
          * @return The Connecting2 state
          */
-        public Connecting toConnecting(HostPort remote) {
+        public Connecting toConnecting(HostPort remote, Optional<SslContext> remoteSslContext) {
             return new Connecting(haProxyMessage, clientSoftwareName,
-                    clientSoftwareVersion, remote);
+                    clientSoftwareVersion, remote, remoteSslContext);
         }
     }
 
@@ -191,8 +193,16 @@ sealed interface ProxyChannelState permits
     record Connecting(@Nullable HAProxyMessage haProxyMessage,
                       @Nullable String clientSoftwareName,
                       @Nullable String clientSoftwareVersion,
-                      HostPort remote)
+                      HostPort remote,
+                      Optional<SslContext> remoteSslContext)
             implements ProxyChannelState {
+
+        Connecting(@Nullable HAProxyMessage haProxyMessage,
+                   @Nullable String clientSoftwareName,
+                   @Nullable String clientSoftwareVersion,
+                   HostPort remote) {
+            this(haProxyMessage, clientSoftwareName, clientSoftwareVersion, remote, Optional.empty());
+        }
 
         /**
          * Transition to {@link Forwarding}

@@ -8,6 +8,7 @@ package io.kroxylicious.proxy.internal;
 
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.function.Function;
 
@@ -22,6 +23,7 @@ import io.micrometer.core.instrument.Timer;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.handler.codec.DecoderException;
 import io.netty.handler.codec.haproxy.HAProxyMessage;
+import io.netty.handler.ssl.SslContext;
 
 import io.kroxylicious.proxy.filter.FilterAndInvoker;
 import io.kroxylicious.proxy.filter.NetFilter;
@@ -68,7 +70,7 @@ import static org.slf4j.LoggerFactory.getLogger;
  *      ↓ frontend.{@link KafkaProxyFrontendHandler#channelRead(ChannelHandlerContext, Object) channelRead} receives any other KRPC request
  *     {@link ProxyChannelState.SelectingServer SelectingServer} ╌╌╌╌⤍ <b>error</b> ╌╌╌╌⤍
  *      │
- *      ↓ netFilter.{@link NetFilter#selectServer(NetFilter.NetFilterContext) selectServer} calls frontend.{@link KafkaProxyFrontendHandler#initiateConnect(HostPort, List) initiateConnect}
+ *      ↓ netFilter.{@link NetFilter#selectServer(NetFilter.NetFilterContext, RoutingContext) selectServer} calls frontend.{@link KafkaProxyFrontendHandler#initiateConnect(HostPort, List) initiateConnect}
  *     {@link ProxyChannelState.Connecting Connecting} ╌╌╌╌⤍ <b>error</b> ╌╌╌╌⤍
  *      │
  *      ↓
@@ -162,7 +164,7 @@ public class ProxyChannelStateMachine {
     private @Nullable KafkaProxyFrontendHandler frontendHandler = null;
 
     /**
-     * The backend handler. Non-null if {@link #onNetFilterInitiateConnect(HostPort, List, VirtualClusterModel, NetFilter)}
+     * The backend handler. Non-null if {@link #onNetFilterInitiateConnect(HostPort, Optional, List, VirtualClusterModel, NetFilter)}
      * has been called
      */
     @VisibleForTesting
@@ -276,6 +278,14 @@ public class ProxyChannelStateMachine {
         this.sessionId = UUID.randomUUID().toString();
     }
 
+    void onNetFilterInitiateConnect(
+                                    HostPort peer,
+                                    List<FilterAndInvoker> filters,
+                                    VirtualClusterModel virtualClusterModel,
+                                    NetFilter netFilter) {
+        onNetFilterInitiateConnect(peer, Optional.empty(), filters, virtualClusterModel, netFilter);
+    }
+
     /**
      * Notify the statemachine that the netfilter has chosen an outbound peer.
      * @param peer the upstream host to connect to.
@@ -285,11 +295,12 @@ public class ProxyChannelStateMachine {
      */
     void onNetFilterInitiateConnect(
                                     HostPort peer,
+                                    Optional<SslContext> peerSslContext,
                                     List<FilterAndInvoker> filters,
                                     VirtualClusterModel virtualClusterModel,
                                     NetFilter netFilter) {
         if (state instanceof ProxyChannelState.SelectingServer selectingServerState) {
-            toConnecting(selectingServerState.toConnecting(peer), filters, virtualClusterModel);
+            toConnecting(selectingServerState.toConnecting(peer, peerSslContext), filters, virtualClusterModel);
         }
         else {
             illegalState(DUPLICATE_INITIATE_CONNECT_ERROR + " : netFilter='" + netFilter + "'");
@@ -492,8 +503,8 @@ public class ProxyChannelStateMachine {
                               List<FilterAndInvoker> filters,
                               VirtualClusterModel virtualClusterModel) {
         setState(connecting);
-        backendHandler = new KafkaProxyBackendHandler(this, virtualClusterModel);
-        Objects.requireNonNull(frontendHandler).inConnecting(connecting.remote(), filters, backendHandler);
+        backendHandler = new KafkaProxyBackendHandler(this, connecting.remoteSslContext());
+        Objects.requireNonNull(frontendHandler).inConnecting(connecting.remote(), connecting.remoteSslContext(), filters, backendHandler);
         proxyToServerConnectionCounter.increment();
         LOGGER.atDebug()
                 .setMessage("{}: Upstream connection to {} established for client at {}:{}")
