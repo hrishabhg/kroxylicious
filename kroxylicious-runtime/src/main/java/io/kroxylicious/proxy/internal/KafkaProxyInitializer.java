@@ -45,6 +45,7 @@ import io.kroxylicious.proxy.internal.net.EndpointGateway;
 import io.kroxylicious.proxy.internal.net.EndpointReconciler;
 import io.kroxylicious.proxy.internal.util.Metrics;
 import io.kroxylicious.proxy.model.VirtualClusterModel;
+import io.kroxylicious.proxy.service.HostPort;
 import io.kroxylicious.proxy.tag.VisibleForTesting;
 
 import edu.umd.cs.findbugs.annotations.NonNull;
@@ -264,6 +265,7 @@ public class KafkaProxyInitializer extends ChannelInitializer<Channel> {
         private final EndpointReconciler endpointReconciler;
         private final ApiVersionsIntersectFilter apiVersionsIntersectFilter;
         private final ApiVersionsDowngradeFilter apiVersionsDowngradeFilter;
+        private List<FilterAndInvoker> cachedFilters = List.of();
 
         InitalizerNetFilter(Channel ch,
                             EndpointBinding binding,
@@ -289,13 +291,13 @@ public class KafkaProxyInitializer extends ChannelInitializer<Channel> {
             LOGGER.info("{}: Selecting NetFilter.NetFilter context: {}", ch, context);
             // var filters = getFilterAndInvokerCollection();
 
-            var target = binding.upstreamTarget();
+            HostPort target = binding.upstreamTarget();
             if (target == null) {
                 // This condition should never happen.
                 throw new IllegalStateException("A target address for binding %s is not known.".formatted(binding));
             }
 
-            context.initiateConnect(target, List.of());
+            context.initiateConnect(target, cachedFilters);
         }
 
         @NonNull
@@ -314,6 +316,7 @@ public class KafkaProxyInitializer extends ChannelInitializer<Channel> {
             }
             // filters.addAll(shortCircuitFilters);
             filters.addAll(brokerAddressFilters);
+            cachedFilters = filters;
             return filters;
         }
     }

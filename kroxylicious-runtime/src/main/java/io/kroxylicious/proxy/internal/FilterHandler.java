@@ -118,7 +118,6 @@ public class FilterHandler extends ChannelDuplexHandler {
             // jump the queue, let responses to asynchronous requests flow back to their sender
             if (decodedFrame.isRecipient(filterAndInvoker.filter())) {
                 completeInternalResponse(decodedFrame);
-                promise.setSuccess();
             }
             else {
                 handleDecodedResponse(decodedFrame, promise);
@@ -221,12 +220,12 @@ public class FilterHandler extends ChannelDuplexHandler {
         final var future = dispatchDecodedResponseFrame(decodedFrame, filterContext);
         boolean defer = !future.isDone();
         if (defer) {
-            return configureResponseFilterChain(decodedFrame, handleDeferredStage(decodedFrame, future), promise)
+            return configureResponseFilterChain(decodedFrame, promise, handleDeferredStage(decodedFrame, future))
                     .whenComplete(this::deferredResponseCompleted)
                     .thenApply(responseFilterResult -> null);
         }
         else {
-            return configureResponseFilterChain(decodedFrame, future, promise)
+            return configureResponseFilterChain(decodedFrame, promise, future)
                     .thenApply(responseFilterResult -> null);
         }
     }
@@ -244,8 +243,9 @@ public class FilterHandler extends ChannelDuplexHandler {
                 : stage.toCompletableFuture();
     }
 
-    private CompletableFuture<ResponseFilterResult> configureResponseFilterChain(DecodedResponseFrame<?> decodedFrame, CompletableFuture<ResponseFilterResult> future,
-                                                                                 @Nullable ChannelPromise promise) {
+    private CompletableFuture<ResponseFilterResult> configureResponseFilterChain(DecodedResponseFrame<?> decodedFrame,
+                                                                                 ChannelPromise promise,
+                                                                                 CompletableFuture<ResponseFilterResult> future) {
         return future.thenApply(FilterHandler::validateFilterResultNonNull)
                 .thenApply(fr -> handleResponseFilterResult(decodedFrame, fr, promise))
                 .exceptionally(t -> handleFilteringException(t, decodedFrame));
@@ -296,9 +296,6 @@ public class FilterHandler extends ChannelDuplexHandler {
             if (LOGGER.isDebugEnabled()) {
                 LOGGER.debug("{}: Filter '{}' drops {} response",
                         channelDescriptor(), filterDescriptor(), decodedFrame.apiKey());
-            }
-            if (promise != null) {
-                promise.setSuccess();
             }
             return responseFilterResult;
         }
