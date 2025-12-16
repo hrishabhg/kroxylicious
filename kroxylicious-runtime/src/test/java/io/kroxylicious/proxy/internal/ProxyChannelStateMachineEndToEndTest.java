@@ -553,7 +553,7 @@ class ProxyChannelStateMachineEndToEndTest {
 
         var dp = new DelegatingDecodePredicate();
         NetFilter filter = mock(NetFilter.class);
-        doAnswer(filterSelectServerBehaviour).when(filter).selectServer(any());
+        doAnswer(filterSelectServerBehaviour).when(filter).selectServer(any(), any());
         VirtualClusterModel virtualClusterModel = mock(VirtualClusterModel.class);
         when(virtualClusterModel.getClusterName()).thenReturn("cluster");
         EndpointBinding endpointBinding = mock(EndpointBinding.class);

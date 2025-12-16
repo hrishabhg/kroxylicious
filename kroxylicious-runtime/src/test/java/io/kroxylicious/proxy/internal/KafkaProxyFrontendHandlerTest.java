@@ -64,6 +64,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
@@ -211,7 +212,7 @@ class KafkaProxyFrontendHandlerTest {
         when(virtualClusterListenerModel.getDownstreamSslContext()).thenReturn(Optional.empty());
         when(virtualClusterModel.gateways()).thenReturn(Map.of("default", virtualClusterListenerModel));
 
-        KafkaProxyFrontendHandler handler = handler(connectContext::set, new DelegatingDecodePredicate(), endpointBinding);
+        KafkaProxyFrontendHandler handler = handler((context, routingContext) -> connectContext.set(context), new DelegatingDecodePredicate(), endpointBinding);
         ChannelPipeline pipeline = inboundChannel.pipeline();
         pipeline.addLast(throwOnReadHandler(new DecoderException(new FrameOversizedException(5, 6))));
         pipeline.addLast(handler);
@@ -238,7 +239,7 @@ class KafkaProxyFrontendHandlerTest {
         when(virtualClusterListenerModel.getDownstreamSslContext()).thenReturn(Optional.of(SslContextBuilder.forClient().build()));
         when(virtualClusterModel.gateways()).thenReturn(Map.of("default", virtualClusterListenerModel));
 
-        KafkaProxyFrontendHandler handler = handler(connectContext::set, new DelegatingDecodePredicate(), endpointBinding);
+        KafkaProxyFrontendHandler handler = handler((context, routingContext) -> connectContext.set(context), new DelegatingDecodePredicate(), endpointBinding);
         ChannelPipeline pipeline = inboundChannel.pipeline();
         pipeline.addLast(throwOnReadHandler(new DecoderException(new FrameOversizedException(5, 6))));
         pipeline.addLast(handler);
@@ -363,7 +364,7 @@ class KafkaProxyFrontendHandlerTest {
 
             connectionInitiated(ctx);
             return null;
-        }).when(filter).selectServer(valueCapture.capture());
+        }).when(filter).selectServer(valueCapture.capture(), any());
 
         var handler = handler(filter, dp, endpointBinding);
         initialiseInboundChannel(handler);
@@ -491,7 +492,7 @@ class KafkaProxyFrontendHandlerTest {
     }
 
     private void handleConnect(NetFilter filter, KafkaProxyFrontendHandler handler) {
-        verify(filter).selectServer(handler);
+        verify(filter).selectServer(handler, any());
         assertThat(proxyChannelStateMachine.state()).isExactlyInstanceOf(ProxyChannelState.Connecting.class);
         assertFalse(inboundChannel.config().isAutoRead(),
                 "Expect inbound autoRead=true, since outbound not yet active");
@@ -589,7 +590,7 @@ class KafkaProxyFrontendHandlerTest {
         assertThat(proxyChannelStateMachine.state()).isInstanceOf(ProxyChannelState.Closed.class);
     }
 
-    private void getNetFilter(NetFilter.NetFilterContext netFilterContext) {
+    private void getNetFilter(NetFilter.NetFilterContext netFilterContext, RoutingContext routingContext) {
         connectContext.set(netFilterContext);
         netFilterContext.initiateConnect(new HostPort(CLUSTER_HOST, CLUSTER_PORT), List.of());
     }

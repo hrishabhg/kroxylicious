@@ -34,6 +34,8 @@ import io.netty.channel.ChannelPromise;
 import io.kroxylicious.proxy.authentication.ClientSaslContext;
 import io.kroxylicious.proxy.authentication.Subject;
 import io.kroxylicious.proxy.authentication.User;
+import io.kroxylicious.proxy.config.TargetCluster;
+import io.kroxylicious.proxy.config.tls.Tls;
 import io.kroxylicious.proxy.filter.Filter;
 import io.kroxylicious.proxy.filter.FilterAndInvoker;
 import io.kroxylicious.proxy.filter.FilterContext;
@@ -76,6 +78,7 @@ public class FilterHandler extends ChannelDuplexHandler {
     private CompletableFuture<Void> readFuture = CompletableFuture.completedFuture(null);
     private @Nullable ChannelHandlerContext ctx;
     private @Nullable PromiseFactory promiseFactory;
+    private final RoutingContext routingContext;
     private static final AtomicBoolean deprecationWarningEmitted = new AtomicBoolean(false);
 
     public FilterHandler(FilterAndInvoker filterAndInvoker,
@@ -84,7 +87,8 @@ public class FilterHandler extends ChannelDuplexHandler {
                          VirtualClusterModel virtualClusterModel,
                          Channel inboundChannel,
                          ProxyChannelStateMachine proxyChannelStateMachine,
-                         ClientSubjectManager clientSubjectManager) {
+                         ClientSubjectManager clientSubjectManager,
+                         RoutingContext routingContext) {
         this.filterAndInvoker = Objects.requireNonNull(filterAndInvoker);
         this.timeoutMs = Assertions.requireStrictlyPositive(timeoutMs, "timeout");
         this.sniHostname = sniHostname;
@@ -92,6 +96,7 @@ public class FilterHandler extends ChannelDuplexHandler {
         this.inboundChannel = inboundChannel;
         this.proxyChannelStateMachine = proxyChannelStateMachine;
         this.clientSubjectManager = clientSubjectManager;
+        this.routingContext = routingContext;
     }
 
     @Override
@@ -499,6 +504,24 @@ public class FilterHandler extends ChannelDuplexHandler {
         @Override
         public Subject authenticatedSubject() {
             return clientSubjectManager.authenticatedSubject();
+        }
+
+        @Override
+        public void setTarget(String bootstrapServers, @Nullable Tls tlsConfig) {
+            if (routingContext.isConnected()) {
+                throw new IllegalStateException("Cannot set target when already connected");
+            }
+            routingContext.setTargetCluster(new TargetCluster(bootstrapServers, Optional.of(tlsConfig)));
+        }
+
+        @Override
+        public Optional<Tls> targetTlsConfig() {
+            return routingContext.targetCluster().tls();
+        }
+
+        @Override
+        public String targetBootstrapServers() {
+            return routingContext.targetCluster().bootstrapServers();
         }
 
         InternalFilterContext(DecodedFrame<?, ?> decodedFrame) {

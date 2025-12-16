@@ -33,6 +33,7 @@ import io.kroxylicious.proxy.model.VirtualClusterModel;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -118,7 +119,7 @@ class KafkaProxyFrontendHandlerMockCollaboratorsTest {
         handler.inSelectingServer();
 
         // Then
-        verify(netFilter).selectServer(handler);
+        verify(netFilter).selectServer(handler, any(RoutingContext.class));
         verify(proxyChannelStateMachine).assertIsConnecting(anyString());
     }
 

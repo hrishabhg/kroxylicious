@@ -180,8 +180,14 @@ public class VirtualClusterModel {
         return new NettyTrustProvider(trustProvider);
     }
 
+    // default upstream ssl context
     private Optional<SslContext> buildUpstreamSslContext() {
-        return targetCluster.tls().map(targetClusterTls -> {
+        return buildUpstreamSslContext(targetCluster.tls());
+    }
+
+    // todo(pbr): move to some tls utility class?
+    public static Optional<SslContext> buildUpstreamSslContext(Optional<Tls> tls) {
+        return tls.map(targetClusterTls -> {
             try {
                 var sslContextBuilder = Optional.ofNullable(targetClusterTls.key()).map(NettyKeyProvider::new).map(NettyKeyProvider::forClient)
                         .orElse(SslContextBuilder.forClient());
