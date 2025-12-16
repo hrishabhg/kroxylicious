@@ -268,6 +268,7 @@ public class KafkaProxyInitializer extends ChannelInitializer<Channel> {
         private final EndpointReconciler endpointReconciler;
         private final ApiVersionsIntersectFilter apiVersionsIntersectFilter;
         private final ApiVersionsDowngradeFilter apiVersionsDowngradeFilter;
+        private List<FilterAndInvoker> cachedFilters = List.of();
 
         InitalizerNetFilter(Channel ch,
                             EndpointBinding binding,
@@ -309,7 +310,7 @@ public class KafkaProxyInitializer extends ChannelInitializer<Channel> {
                         routingContext.targetCluster().tls());
             }
 
-            context.initiateConnect(target, targetSslContext, List.of());
+            context.initiateConnect(target, targetSslContext, cachedFilters);
         }
 
         @NonNull
@@ -330,6 +331,7 @@ public class KafkaProxyInitializer extends ChannelInitializer<Channel> {
             // filters.addAll(shortCircuitFilters);
             filters.addAll(brokerAddressFilters);
             filters.addAll(clientRouter);
+            cachedFilters = filters;
             return filters;
         }
     }
