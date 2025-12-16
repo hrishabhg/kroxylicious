@@ -512,6 +512,11 @@ public class FilterHandler extends ChannelDuplexHandler {
         }
 
         @Override
+        public boolean isTargetConnected() {
+            return routingContext.isConnected();
+        }
+
+        @Override
         public Optional<Tls> targetTlsConfig() {
             return routingContext.targetCluster().tls();
         }
