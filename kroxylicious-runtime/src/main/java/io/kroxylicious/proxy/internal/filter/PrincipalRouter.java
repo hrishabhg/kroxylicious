@@ -33,8 +33,8 @@ public class PrincipalRouter implements ApiVersionsRequestFilter, SaslHandshakeR
 
     private static final Map<String, TargetCluster> PrincipalRoutes = Map.of(
             "alice", new TargetCluster("localhost:9092", Optional.empty()),
-            "bob", new TargetCluster("localhost:50443", Optional.empty()),
-            "default", new TargetCluster("localhost:9095", Optional.empty())
+            "bob", new TargetCluster("localhost:62496", Optional.empty()),
+            "default", new TargetCluster("localhost:62496", Optional.empty())
     );
 
     @Override
