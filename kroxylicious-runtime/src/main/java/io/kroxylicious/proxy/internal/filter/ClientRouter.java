@@ -24,7 +24,9 @@ public class ClientRouter implements ApiVersionsRequestFilter {
 
     private static final Map<String, TargetCluster> ClientRoutes = Map.of(
             "admin-1", new TargetCluster("localhost:9092", Optional.empty()),
-            "default", new TargetCluster("localhost:50443", Optional.empty())
+            "clientX", new TargetCluster("localhost:9092", Optional.empty()),
+            "clientY", new TargetCluster("localhost:50443", Optional.empty()),
+            "default", new TargetCluster("localhost:9095", Optional.empty()) // error cluster
     );
 
     @Override

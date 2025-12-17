@@ -321,15 +321,18 @@ public class KafkaProxyInitializer extends ChannelInitializer<Channel> {
 
             NettyFilterContext filterContext = new NettyFilterContext(ch.eventLoop(), pfr);
             List<FilterAndInvoker> filterChain = filterChainFactory.createFilters(filterContext, filterDefinitions);
-            List<FilterAndInvoker> router;
-            if (Objects.equals(System.getenv("POC"), "CLIENT")) {
+            List<FilterAndInvoker> router = null;
+            if (Objects.equals(System.getenv("POC"), "CLIENT_ROUTING")) {
                 router = FilterAndInvoker.build("ClientRouter (internal)", new ClientRouter());
             }
-            else {
+            else if (Objects.equals(System.getenv("POC"), "PRINCIPAL_ROUTING")) {
                 router = FilterAndInvoker.build("PrincipalRouter (internal)", new PrincipalRouter());
             }
             List<FilterAndInvoker> brokerAddressFilters = FilterAndInvoker.build("BrokerAddress (internal)", new BrokerAddressFilter(gateway, endpointReconciler));
-            var filters = new ArrayList<>(router);
+            ArrayList<FilterAndInvoker> filters = new ArrayList<>();
+            if (router != null) {
+                filters.addAll(router);
+            }
             filters.addAll(apiVersionFilters);
             filters.addAll(FilterAndInvoker.build("ApiVersionsDowngrade (internal)", apiVersionsDowngradeFilter));
             filters.addAll(filterChain);

@@ -59,6 +59,7 @@ public class PrincipalRouter implements ApiVersionsRequestFilter, SaslHandshakeR
         // return plain sasl mechanism for simplicity
         return context.requestFilterResultBuilder()
                 .shortCircuitResponse(new SaslHandshakeResponseData()
+                        .setErrorCode(Errors.NONE.code())
                         .setMechanisms(List.of("PLAIN")))
                 .completed();
     }

@@ -155,7 +155,7 @@ public class FilterHandler extends ChannelDuplexHandler {
                 });
             }
             else {
-                throw new IllegalStateException("Filter '" + filterAndInvoker.filterName() + "': Unexpected message reading from upstream: " + msgDescriptor(msg));
+                throw new IllegalStateException("Filter '" + filterAndInvoker.filterName() + "': Unexpected message writing to downstream: " + msgDescriptor(msg));
             }
         }
     }
@@ -331,6 +331,7 @@ public class FilterHandler extends ChannelDuplexHandler {
         if (requestFilterResult.message() != null) {
             if (requestFilterResult.shortCircuitResponse()) {
                 forwardShortCircuitResponse(decodedFrame, requestFilterResult);
+                inboundChannel.read();
             }
             else {
                 forwardRequest(decodedFrame, requestFilterResult);
