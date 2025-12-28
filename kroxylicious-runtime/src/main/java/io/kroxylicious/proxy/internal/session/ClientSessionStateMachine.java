@@ -137,8 +137,7 @@ public class ClientSessionStateMachine {
         LOGGER.debug("Session {} started from {}:{}",
                 sessionId, frontend.remoteHost(), frontend.remotePort());
 
-        ClientSessionState.ClientActive clientActive =
-                ((ClientSessionState.Startup) state).toClientActive();
+        ClientSessionState.ClientActive clientActive = ((ClientSessionState.Startup) state).toClientActive();
         setState(clientActive);
 
         clientToProxyConnectionCounter.increment();
@@ -163,8 +162,8 @@ public class ClientSessionStateMachine {
 
         if (cause instanceof DecoderException de
                 && de.getCause() instanceof FrameOversizedException e) {
-            String tlsHint = tlsEnabled ? "" :
-                    " Possible TLS mismatch? See " +
+            String tlsHint = tlsEnabled ? ""
+                    : " Possible TLS mismatch? See " +
                             StableKroxyliciousLinkGenerator.INSTANCE.errorLink(
                                     StableKroxyliciousLinkGenerator.CLIENT_TLS);
             LOGGER.warn("Oversized frame from client: max={}, received={}.{}",
@@ -213,11 +212,11 @@ public class ClientSessionStateMachine {
      * Called by NetFilter to initiate connection to a single cluster (backward compatible).
      */
     public void onNetFilterInitiateConnect(
-            HostPort target,
-            Optional<SslContext> sslContext,
-            List<FilterAndInvoker> filters,
-            VirtualClusterModel virtualCluster,
-            NetFilter netFilter) {
+                                           HostPort target,
+                                           Optional<SslContext> sslContext,
+                                           List<FilterAndInvoker> filters,
+                                           VirtualClusterModel virtualCluster,
+                                           NetFilter netFilter) {
 
         if (!(state instanceof ClientSessionState.ApiVersions ||
                 state instanceof ClientSessionState.Routing)) {
@@ -252,10 +251,10 @@ public class ClientSessionStateMachine {
      * Called by NetFilter to initiate multi-cluster connections.
      */
     public void onNetFilterInitiateMultiClusterConnect(
-            Map<String, TargetCluster> clusters,
-            List<FilterAndInvoker> filters,
-            VirtualClusterModel virtualCluster,
-            NetFilter netFilter) {
+                                                       Map<String, TargetCluster> clusters,
+                                                       List<FilterAndInvoker> filters,
+                                                       VirtualClusterModel virtualCluster,
+                                                       NetFilter netFilter) {
 
         if (!(state instanceof ClientSessionState.ApiVersions ||
                 state instanceof ClientSessionState.Routing)) {
@@ -430,13 +429,12 @@ public class ClientSessionStateMachine {
 
     @SuppressWarnings("unchecked")
     private boolean transitionToRoutingOrApiVersions(
-            Object msg,
-            Function<DecodedRequestFrame<ApiVersionsRequestData>, ClientSessionState.ApiVersions> toApiVersions,
-            Function<DecodedRequestFrame<ApiVersionsRequestData>, ClientSessionState.Routing> toRouting) {
+                                                     Object msg,
+                                                     Function<DecodedRequestFrame<ApiVersionsRequestData>, ClientSessionState.ApiVersions> toApiVersions,
+                                                     Function<DecodedRequestFrame<ApiVersionsRequestData>, ClientSessionState.Routing> toRouting) {
 
         if (isApiVersionsRequest(msg)) {
-            DecodedRequestFrame<ApiVersionsRequestData> frame =
-                    (DecodedRequestFrame<ApiVersionsRequestData>) msg;
+            DecodedRequestFrame<ApiVersionsRequestData> frame = (DecodedRequestFrame<ApiVersionsRequestData>) msg;
             toApiVersionsState(toApiVersions.apply(frame), frame);
             return true;
         }
@@ -464,8 +462,8 @@ public class ClientSessionStateMachine {
     // ==================== State Transitions ====================
 
     private void toApiVersionsState(
-            ClientSessionState.ApiVersions apiVersions,
-            DecodedRequestFrame<ApiVersionsRequestData> frame) {
+                                    ClientSessionState.ApiVersions apiVersions,
+                                    DecodedRequestFrame<ApiVersionsRequestData> frame) {
         setState(apiVersions);
         Objects.requireNonNull(frontendHandler).inApiVersions(frame);
     }

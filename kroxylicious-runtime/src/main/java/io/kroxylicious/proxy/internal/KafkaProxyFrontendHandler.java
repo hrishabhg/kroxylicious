@@ -149,11 +149,11 @@ public class KafkaProxyFrontendHandler
      * @param sessionStateMachine the session state machine (replaces ProxyChannelStateMachine)
      */
     KafkaProxyFrontendHandler(
-            NetFilter netFilter,
-            DelegatingDecodePredicate dp,
-            TransportSubjectBuilder subjectBuilder,
-            EndpointBinding endpointBinding,
-            ClientSessionStateMachine sessionStateMachine) {
+                              NetFilter netFilter,
+                              DelegatingDecodePredicate dp,
+                              TransportSubjectBuilder subjectBuilder,
+                              EndpointBinding endpointBinding,
+                              ClientSessionStateMachine sessionStateMachine) {
         this.netFilter = netFilter;
         this.dp = dp;
         this.subjectBuilder = Objects.requireNonNull(subjectBuilder);
@@ -362,17 +362,17 @@ public class KafkaProxyFrontendHandler
      * @param connectionManager the connection manager (will have single cluster)
      */
     public void inConnecting(
-            HostPort remote,
-            Optional<SslContext> remoteSslContext,
-            List<FilterAndInvoker> filters,
-            ClusterConnectionManager connectionManager) {
+                             HostPort remote,
+                             Optional<SslContext> remoteSslContext,
+                             List<FilterAndInvoker> filters,
+                             ClusterConnectionManager connectionManager) {
 
         this.connectionManager = connectionManager;
         this.filters = filters;
 
         // todo: check if still important
         // if (routingContext != null) {
-        //    routingContext.connected();
+        // routingContext.connected();
         // }
 
         LOGGER.debug("{}: Connecting to backend broker {} using filters {}",
@@ -405,15 +405,15 @@ public class KafkaProxyFrontendHandler
      * @param connectionManager the connection manager (will have multiple clusters)
      */
     public void inMultiClusterConnecting(
-            Map<String, TargetCluster> clusters,
-            List<FilterAndInvoker> filters,
-            ClusterConnectionManager connectionManager) {
+                                         Map<String, TargetCluster> clusters,
+                                         List<FilterAndInvoker> filters,
+                                         ClusterConnectionManager connectionManager) {
 
         this.connectionManager = connectionManager;
         this.filters = filters;
 
         // if (routingContext != null) {
-        //    routingContext.connected();
+        // routingContext.connected();
         // }
 
         LOGGER.info("{}: Connecting to {} clusters using filters {}",
@@ -614,9 +614,9 @@ public class KafkaProxyFrontendHandler
      */
     @Override
     public void initiateConnect(
-            HostPort remote,
-            Optional<SslContext> remoteSslContext,
-            List<FilterAndInvoker> filters) {
+                                HostPort remote,
+                                Optional<SslContext> remoteSslContext,
+                                List<FilterAndInvoker> filters) {
 
         if (LOGGER.isDebugEnabled()) {
             LOGGER.debug("{}: Connecting to backend broker {} using filters {}",
@@ -636,9 +636,9 @@ public class KafkaProxyFrontendHandler
      * @param filters protocol filters
      */
     public void initiateMultiClusterConnect(
-            Map<String, HostPort> remotes,
-            Map<String, Optional<SslContext>> sslContexts,
-            List<FilterAndInvoker> filters) {
+                                            Map<String, HostPort> remotes,
+                                            Map<String, Optional<SslContext>> sslContexts,
+                                            List<FilterAndInvoker> filters) {
 
         if (LOGGER.isDebugEnabled()) {
             LOGGER.debug("{}: Connecting to {} backend clusters using filters {}",
@@ -693,10 +693,10 @@ public class KafkaProxyFrontendHandler
     }
 
     private void addFiltersToPipeline(
-            List<FilterAndInvoker> filters,
-            ChannelPipeline pipeline,
-            Channel inboundChannel,
-            RoutingContextImpl routingContext) {
+                                      List<FilterAndInvoker> filters,
+                                      ChannelPipeline pipeline,
+                                      Channel inboundChannel,
+                                      RoutingContextImpl routingContext) {
 
         int num = 0;
         for (var protocolFilter : filters) {
@@ -733,8 +733,8 @@ public class KafkaProxyFrontendHandler
     }
 
     private static ResponseFrame buildErrorResponseFrame(
-            DecodedRequestFrame<?> triggerFrame,
-            Throwable error) {
+                                                         DecodedRequestFrame<?> triggerFrame,
+                                                         Throwable error) {
         var responseData = KafkaProxyExceptionMapper.errorResponseMessage(triggerFrame, error);
         final ResponseHeaderData responseHeaderData = new ResponseHeaderData();
         responseHeaderData.setCorrelationId(triggerFrame.correlationId());

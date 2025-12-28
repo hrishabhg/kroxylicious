@@ -67,12 +67,12 @@ public class ClusterConnectionManager {
     private volatile boolean anyConnected = false;
 
     public ClusterConnectionManager(
-            String sessionId,
-            String virtualClusterName,
-            ClientSessionStateMachine sessionStateMachine,
-            int socketFrameMaxSizeBytes,
-            boolean logNetwork,
-            boolean logFrames) {
+                                    String sessionId,
+                                    String virtualClusterName,
+                                    ClientSessionStateMachine sessionStateMachine,
+                                    int socketFrameMaxSizeBytes,
+                                    boolean logNetwork,
+                                    boolean logFrames) {
         this.sessionId = Objects.requireNonNull(sessionId);
         this.virtualClusterName = Objects.requireNonNull(virtualClusterName);
         this.sessionStateMachine = Objects.requireNonNull(sessionStateMachine);
@@ -210,9 +210,9 @@ public class ClusterConnectionManager {
      * @return future that completes when connected
      */
     public CompletableFuture<BackendStateMachine> connectCluster(
-            String clusterId,
-            Channel inboundChannel,
-            Optional<SslContext> sslContext) {
+                                                                 String clusterId,
+                                                                 Channel inboundChannel,
+                                                                 Optional<SslContext> sslContext) {
 
         BackendStateMachine backend = backends.get(clusterId);
         if (backend == null) {
@@ -227,8 +227,8 @@ public class ClusterConnectionManager {
      * Connect to the primary cluster.
      */
     public CompletableFuture<BackendStateMachine> connectPrimary(
-            Channel inboundChannel,
-            Optional<SslContext> sslContext) {
+                                                                 Channel inboundChannel,
+                                                                 Optional<SslContext> sslContext) {
 
         if (primaryClusterId == null) {
             return CompletableFuture.failedFuture(
@@ -261,8 +261,8 @@ public class ClusterConnectionManager {
      * Useful for failover scenarios.
      */
     public CompletableFuture<BackendStateMachine> connectAny(
-            Channel inboundChannel,
-            Map<String, Optional<SslContext>> sslContexts) {
+                                                             Channel inboundChannel,
+                                                             Map<String, Optional<SslContext>> sslContexts) {
 
         CompletableFuture<BackendStateMachine> result = new CompletableFuture<>();
         List<CompletableFuture<BackendStateMachine>> futures = new ArrayList<>();

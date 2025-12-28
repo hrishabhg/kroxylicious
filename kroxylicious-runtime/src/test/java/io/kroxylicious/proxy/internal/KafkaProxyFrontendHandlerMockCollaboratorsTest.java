@@ -28,8 +28,10 @@ import io.netty.handler.codec.haproxy.HAProxyProxiedProtocol;
 import io.kroxylicious.proxy.filter.NetFilter;
 import io.kroxylicious.proxy.internal.net.EndpointBinding;
 import io.kroxylicious.proxy.internal.net.EndpointGateway;
+import io.kroxylicious.proxy.internal.session.ClientSessionStateMachine;
 import io.kroxylicious.proxy.internal.subject.DefaultSubjectBuilder;
 import io.kroxylicious.proxy.model.VirtualClusterModel;
+import io.kroxylicious.proxy.net.RoutingContext;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -64,7 +66,7 @@ class KafkaProxyFrontendHandlerMockCollaboratorsTest {
     ChannelHandlerContext clientCtx;
 
     @Mock
-    ProxyChannelStateMachine proxyChannelStateMachine;
+    ClientSessionStateMachine proxyChannelStateMachine;
     private KafkaProxyFrontendHandler handler;
 
     @BeforeEach
@@ -119,7 +121,7 @@ class KafkaProxyFrontendHandlerMockCollaboratorsTest {
         handler.inSelectingServer();
 
         // Then
-        verify(netFilter).selectServer(handler, any(RoutingContextImpl.class));
+        verify(netFilter).selectServer(handler, any(RoutingContext.class));
         verify(proxyChannelStateMachine).assertIsConnecting(anyString());
     }
 

@@ -103,9 +103,10 @@ public sealed interface ClientSessionState permits
      * ApiVersions request received and responded to.
      */
     record ApiVersions(
-            @Nullable HAProxyMessage haProxyMessage,
-            @Nullable String clientSoftwareName,
-            @Nullable String clientSoftwareVersion) implements ClientSessionState {
+                       @Nullable HAProxyMessage haProxyMessage,
+                       @Nullable String clientSoftwareName,
+                       @Nullable String clientSoftwareVersion)
+            implements ClientSessionState {
 
         public Routing toRouting() {
             return new Routing(haProxyMessage, clientSoftwareName, clientSoftwareVersion);
@@ -117,9 +118,10 @@ public sealed interface ClientSessionState permits
      * This is the steady state during normal operation.
      */
     record Routing(
-            @Nullable HAProxyMessage haProxyMessage,
-            @Nullable String clientSoftwareName,
-            @Nullable String clientSoftwareVersion) implements ClientSessionState {
+                   @Nullable HAProxyMessage haProxyMessage,
+                   @Nullable String clientSoftwareName,
+                   @Nullable String clientSoftwareVersion)
+            implements ClientSessionState {
 
         public Closed toClosed() {
             return Closed.INSTANCE;
@@ -129,7 +131,5 @@ public sealed interface ClientSessionState permits
     /**
      * Terminal state - session is closed.
      */
-    record Closed() implements ClientSessionState {
-        public static final Closed INSTANCE = new Closed();
-    }
+    record Closed() implements ClientSessionState { public static final Closed INSTANCE = new Closed(); }
 }

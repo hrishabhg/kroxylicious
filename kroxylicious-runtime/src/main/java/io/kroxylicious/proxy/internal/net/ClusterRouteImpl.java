@@ -18,8 +18,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import io.kroxylicious.proxy.config.tls.Tls;
-import io.kroxylicious.proxy.net.ClusterRoute;
 import io.kroxylicious.proxy.internal.session.BackendStateMachine;
+import io.kroxylicious.proxy.net.ClusterRoute;
 
 /**
  * Implementation of {@link ClusterRoute} that wraps a {@link BackendStateMachine}.
@@ -61,8 +61,8 @@ public class ClusterRouteImpl implements ClusterRoute {
 
     @Override
     public <M extends ApiMessage> CompletionStage<M> sendRequest(
-            RequestHeaderData header,
-            ApiMessage request) {
+                                                                 RequestHeaderData header,
+                                                                 ApiMessage request) {
 
         Objects.requireNonNull(header, "header");
         Objects.requireNonNull(request, "request");

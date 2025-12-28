@@ -18,10 +18,10 @@ import org.apache.kafka.common.protocol.ApiMessage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import io.kroxylicious.proxy.net.ClusterRoute;
-import io.kroxylicious.proxy.net.RoutingContext;
 import io.kroxylicious.proxy.internal.session.BackendStateMachine;
 import io.kroxylicious.proxy.internal.session.ClusterConnectionManager;
+import io.kroxylicious.proxy.net.ClusterRoute;
+import io.kroxylicious.proxy.net.RoutingContext;
 
 import edu.umd.cs.findbugs.annotations.Nullable;
 
@@ -86,8 +86,7 @@ public class RoutingContextImpl implements RoutingContext {
         }
 
         String primaryId = connectionManager.primaryClusterId();
-        return cluster(primaryId).orElseThrow(() ->
-                new IllegalStateException("Primary cluster not found: " + primaryId));
+        return cluster(primaryId).orElseThrow(() -> new IllegalStateException("Primary cluster not found: " + primaryId));
     }
 
     @Override
@@ -110,16 +109,15 @@ public class RoutingContextImpl implements RoutingContext {
 
     @Override
     public <M extends ApiMessage> CompletionStage<M> sendRequest(
-            String clusterId,
-            RequestHeaderData header,
-            ApiMessage request) {
+                                                                 String clusterId,
+                                                                 RequestHeaderData header,
+                                                                 ApiMessage request) {
 
         Objects.requireNonNull(clusterId, "clusterId");
         Objects.requireNonNull(header, "header");
         Objects.requireNonNull(request, "request");
 
-        ClusterRoute route = cluster(clusterId).orElseThrow(() ->
-                new IllegalArgumentException("Unknown cluster: " + clusterId));
+        ClusterRoute route = cluster(clusterId).orElseThrow(() -> new IllegalArgumentException("Unknown cluster: " + clusterId));
 
         if (!route.isConnected()) {
             return CompletableFuture.failedFuture(
@@ -132,9 +130,9 @@ public class RoutingContextImpl implements RoutingContext {
 
     @Override
     public <M extends ApiMessage> CompletionStage<Map<String, M>> fanOutRequest(
-            Set<String> clusterIds,
-            RequestHeaderData header,
-            ApiMessage request) {
+                                                                                Set<String> clusterIds,
+                                                                                RequestHeaderData header,
+                                                                                ApiMessage request) {
 
         Objects.requireNonNull(clusterIds, "clusterIds");
         Objects.requireNonNull(header, "header");
@@ -166,7 +164,7 @@ public class RoutingContextImpl implements RoutingContext {
             // Clone header for each request to avoid correlation ID conflicts
             RequestHeaderData clonedHeader = cloneHeader(header);
 
-            CompletableFuture<M> future = route.<M>sendRequest(clonedHeader, request)
+            CompletableFuture<M> future = route.<M> sendRequest(clonedHeader, request)
                     .toCompletableFuture();
             futures.put(clusterId, future);
         }
@@ -199,8 +197,8 @@ public class RoutingContextImpl implements RoutingContext {
 
     @Override
     public <M extends ApiMessage> CompletionStage<Map<String, M>> fanOutRequestToAll(
-            RequestHeaderData header,
-            ApiMessage request) {
+                                                                                     RequestHeaderData header,
+                                                                                     ApiMessage request) {
         return fanOutRequest(clusterIds(), header, request);
     }
 

@@ -34,8 +34,7 @@ public class PrincipalRouter implements ApiVersionsRequestFilter, SaslHandshakeR
     private static final Map<String, TargetCluster> PrincipalRoutes = Map.of(
             "alice", new TargetCluster("localhost:9092", Optional.empty()),
             "bob", new TargetCluster("localhost:62496", Optional.empty()),
-            "default", new TargetCluster("localhost:62496", Optional.empty())
-    );
+            "default", new TargetCluster("localhost:62496", Optional.empty()));
 
     @Override
     public CompletionStage<RequestFilterResult> onSaslAuthenticateRequest(short apiVersion, RequestHeaderData header, SaslAuthenticateRequestData request,
@@ -43,11 +42,7 @@ public class PrincipalRouter implements ApiVersionsRequestFilter, SaslHandshakeR
         // do not validate the password. extract the username and set the route
         // send the response back to the client
         // don't do for re-authentication
-        if (!context.isTargetConnected()) {
-            String username = getPrincipalFromAuthBytes(request.authBytes());
-            TargetCluster targetCluster = PrincipalRoutes.getOrDefault(username, PrincipalRoutes.get("alice"));
-            context.setTarget(targetCluster.bootstrapServers(), targetCluster.tls().orElse(null));
-        }
+        context.routingContext().primaryCluster();
         return context.requestFilterResultBuilder()
                 .shortCircuitResponse(new SaslAuthenticateResponseData().setAuthBytes("".getBytes(StandardCharsets.UTF_8)))
                 .completed();

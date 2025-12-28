@@ -96,16 +96,16 @@ public class BackendStateMachine {
     private final Timer backpressureTimer_;
 
     public BackendStateMachine(
-            String clusterId,
-            TargetCluster targetCluster,
-            int nodeIdOffset,
-            ClusterConnectionManager connectionManager,
-            int socketFrameMaxSizeBytes,
-            boolean logNetwork,
-            boolean logFrames,
-            Counter connectionCounter,
-            Counter errorCounter,
-            Timer backpressureTimer) {
+                               String clusterId,
+                               TargetCluster targetCluster,
+                               int nodeIdOffset,
+                               ClusterConnectionManager connectionManager,
+                               int socketFrameMaxSizeBytes,
+                               boolean logNetwork,
+                               boolean logFrames,
+                               Counter connectionCounter,
+                               Counter errorCounter,
+                               Timer backpressureTimer) {
         this.clusterId = Objects.requireNonNull(clusterId);
         this.targetCluster = Objects.requireNonNull(targetCluster);
         this.nodeIdOffset = nodeIdOffset;
@@ -159,8 +159,8 @@ public class BackendStateMachine {
      * @return future that completes when connection is established
      */
     public CompletableFuture<BackendStateMachine> connect(
-            Channel inboundChannel,
-            Optional<SslContext> sslContext) {
+                                                          Channel inboundChannel,
+                                                          Optional<SslContext> sslContext) {
 
         if (!(state instanceof BackendConnectionState.Created)) {
             return CompletableFuture.failedFuture(
@@ -172,8 +172,7 @@ public class BackendStateMachine {
                 connectionManager.sessionId(), clusterId, target);
 
         // Transition to Connecting
-        BackendConnectionState.Connecting connecting =
-                ((BackendConnectionState.Created) state).toConnecting(target, sslContext);
+        BackendConnectionState.Connecting connecting = ((BackendConnectionState.Created) state).toConnecting(target, sslContext);
         setState(connecting);
 
         // Create backend handler
@@ -396,9 +395,9 @@ public class BackendStateMachine {
     }
 
     private void configurePipeline(
-            ChannelPipeline pipeline,
-            Optional<SslContext> sslContext,
-            HostPort target) {
+                                   ChannelPipeline pipeline,
+                                   Optional<SslContext> sslContext,
+                                   HostPort target) {
 
         CorrelationManager correlationManager = new CorrelationManager();
 
@@ -445,9 +444,9 @@ public class BackendStateMachine {
      */
     @SuppressWarnings("unchecked")
     public <M extends ApiMessage> CompletableFuture<M> sendRequest(
-            RequestHeaderData header,
-            ApiMessage request,
-            boolean hasResponse) {
+                                                                   RequestHeaderData header,
+                                                                   ApiMessage request,
+                                                                   boolean hasResponse) {
 
         if (!state.canSendRequests()) {
             return CompletableFuture.failedFuture(

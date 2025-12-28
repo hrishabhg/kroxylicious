@@ -54,8 +54,9 @@ public sealed interface BackendConnectionState permits
      * TCP connection in progress (and TLS handshake if applicable).
      */
     record Connecting(
-            HostPort target,
-            Optional<SslContext> sslContext) implements BackendConnectionState {
+                      HostPort target,
+                      Optional<SslContext> sslContext)
+            implements BackendConnectionState {
 
         public Connected toConnected() {
             return new Connected(target);
@@ -80,8 +81,9 @@ public sealed interface BackendConnectionState permits
      * Connection attempt failed.
      */
     record Failed(
-            HostPort target,
-            @Nullable Throwable cause) implements BackendConnectionState {
+                  HostPort target,
+                  @Nullable Throwable cause)
+            implements BackendConnectionState {
 
         public Closed toClosed() {
             return Closed.INSTANCE;
@@ -91,9 +93,7 @@ public sealed interface BackendConnectionState permits
     /**
      * Terminal state - connection closed.
      */
-    record Closed() implements BackendConnectionState {
-        public static final Closed INSTANCE = new Closed();
-    }
+    record Closed() implements BackendConnectionState { public static final Closed INSTANCE = new Closed(); }
 
     // Convenience methods
     default boolean isConnected() {

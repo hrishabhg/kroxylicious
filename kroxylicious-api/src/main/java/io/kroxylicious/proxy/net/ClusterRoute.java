@@ -87,6 +87,6 @@ public interface ClusterRoute {
      * @return CompletionStage that completes with the response, or null for ack-less Produce
      */
     <M extends ApiMessage> CompletionStage<M> sendRequest(
-            RequestHeaderData header,
-            ApiMessage request);
+                                                          RequestHeaderData header,
+                                                          ApiMessage request);
 }

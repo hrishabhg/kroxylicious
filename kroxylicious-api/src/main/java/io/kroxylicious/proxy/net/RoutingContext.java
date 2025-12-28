@@ -116,9 +116,9 @@ public interface RoutingContext {
      * @throws IllegalStateException if cluster is not connected
      */
     <M extends ApiMessage> CompletionStage<M> sendRequest(
-            String clusterId,
-            RequestHeaderData header,
-            ApiMessage request);
+                                                          String clusterId,
+                                                          RequestHeaderData header,
+                                                          ApiMessage request);
 
     /**
      * Fan-out a request to specified clusters and collect responses.
@@ -133,9 +133,9 @@ public interface RoutingContext {
      * @return CompletionStage completing with map of clusterId to response
      */
     <M extends ApiMessage> CompletionStage<Map<String, M>> fanOutRequest(
-            Set<String> clusterIds,
-            RequestHeaderData header,
-            ApiMessage request);
+                                                                         Set<String> clusterIds,
+                                                                         RequestHeaderData header,
+                                                                         ApiMessage request);
 
     /**
      * Fan-out a request to all available clusters.
@@ -148,8 +148,8 @@ public interface RoutingContext {
      * @return CompletionStage completing with map of clusterId to response
      */
     <M extends ApiMessage> CompletionStage<Map<String, M>> fanOutRequestToAll(
-            RequestHeaderData header,
-            ApiMessage request);
+                                                                              RequestHeaderData header,
+                                                                              ApiMessage request);
 
     // ==================== Node ID Utilities ====================
 
