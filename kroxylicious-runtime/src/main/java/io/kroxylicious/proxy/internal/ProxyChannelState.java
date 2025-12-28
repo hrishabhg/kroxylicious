@@ -7,8 +7,10 @@
 package io.kroxylicious.proxy.internal;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 
 import org.apache.kafka.common.message.ApiVersionsRequestData;
 
@@ -25,6 +27,7 @@ import static io.kroxylicious.proxy.internal.ProxyChannelState.ApiVersions;
 import static io.kroxylicious.proxy.internal.ProxyChannelState.ClientActive;
 import static io.kroxylicious.proxy.internal.ProxyChannelState.Closed;
 import static io.kroxylicious.proxy.internal.ProxyChannelState.Connecting;
+import static io.kroxylicious.proxy.internal.ProxyChannelState.MultiClusterConnecting;
 import static io.kroxylicious.proxy.internal.ProxyChannelState.Forwarding;
 import static io.kroxylicious.proxy.internal.ProxyChannelState.HaProxy;
 import static io.kroxylicious.proxy.internal.ProxyChannelState.SelectingServer;
@@ -40,6 +43,7 @@ sealed interface ProxyChannelState permits
         ApiVersions,
         SelectingServer,
         Connecting,
+        MultiClusterConnecting,
         Forwarding,
         Closed {
 
@@ -287,6 +291,10 @@ sealed interface ProxyChannelState permits
      * The final state, where there are no connections to either client or server
      */
     record Closed() implements ProxyChannelState {
+
+    }
+
+    record MultiClusterConnecting(Map<String, HostPort> pendingConnections, Set<String> connectedBackends) implements ProxyChannelState {
 
     }
 

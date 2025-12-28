@@ -7,6 +7,7 @@
 package io.kroxylicious.proxy.internal;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
@@ -170,6 +171,9 @@ public class ProxyChannelStateMachine {
     @VisibleForTesting
     @Nullable
     private KafkaProxyBackendHandler backendHandler;
+
+    @Nullable
+    private Map<String, KafkaProxyBackendHandler> backendHandlers;
 
     ProxyChannelState state() {
         return state;
