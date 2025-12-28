@@ -5,11 +5,15 @@
  */
 package io.kroxylicious.proxy.internal.session;
 
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionStage;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 
+import org.apache.kafka.common.message.RequestHeaderData;
+import org.apache.kafka.common.protocol.ApiKeys;
 import org.apache.kafka.common.protocol.ApiMessage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -31,6 +35,8 @@ import io.netty.handler.ssl.SslHandler;
 import io.netty.handler.ssl.SslHandshakeCompletionEvent;
 
 import io.kroxylicious.proxy.config.TargetCluster;
+import io.kroxylicious.proxy.frame.DecodedRequestFrame;
+import io.kroxylicious.proxy.frame.DecodedResponseFrame;
 import io.kroxylicious.proxy.internal.KafkaProxyBackendHandler;
 import io.kroxylicious.proxy.internal.codec.CorrelationManager;
 import io.kroxylicious.proxy.internal.codec.KafkaRequestEncoder;
@@ -78,6 +84,11 @@ public class BackendStateMachine {
 
     // Connection promise - completed when connection is ready
     private final CompletableFuture<BackendStateMachine> connectionFuture = new CompletableFuture<>();
+
+    // Async request tracking for RoutingContext.sendRequest()
+    // Uses negative correlation IDs to avoid conflicts with client requests
+    private final Map<Integer, CompletableFuture<ApiMessage>> pendingAsyncRequests = new ConcurrentHashMap<>();
+    private final AtomicInteger asyncCorrelationIdGenerator = new AtomicInteger(-1);
 
     // Metrics
     private final Counter connectionCounter;
@@ -326,7 +337,7 @@ public class BackendStateMachine {
     // ==================== Backpressure ====================
 
     /**
-     * Apply backpressure - stop reading from this backend.““
+     * Apply backpressure - stop reading from this backend.
      */
     public void applyBackpressure() {
         if (!readsBlocked && serverCtx != null) {
@@ -358,6 +369,15 @@ public class BackendStateMachine {
         return readsBlocked;
     }
 
+    /**
+     * Check if this backend's channel is writable (can accept more data).
+     *
+     * <p>Used for backpressure: when ANY backend becomes unwritable, we apply
+     * backpressure to the client. When ALL backends become writable again,
+     * we relieve client backpressure.</p>
+     *
+     * @return true if the channel is writable, false otherwise
+     */
     public boolean isChannelWritable() {
         return serverCtx != null && serverCtx.channel().isWritable();
     }
@@ -413,15 +433,20 @@ public class BackendStateMachine {
     /**
      * Send a request to this cluster and receive the response asynchronously.
      *
+     * <p>This method is used by {@code RoutingContext.sendRequest()} for explicit
+     * cluster targeting. It creates a properly framed request, tracks correlation,
+     * and routes the response back to the returned promise.</p>
+     *
      * @param <M> response message type
-     * @param header request header
+     * @param header request header (requestApiVersion should be set)
      * @param request request message
      * @param hasResponse whether a response is expected
-     * @return CompletionStage completing with the response
+     * @return CompletableFuture completing with the response
      */
-    public <M extends ApiMessage> CompletionStage<M> sendRequest(
-            org.apache.kafka.common.message.RequestHeaderData header,
-            org.apache.kafka.common.protocol.ApiMessage request,
+    @SuppressWarnings("unchecked")
+    public <M extends ApiMessage> CompletableFuture<M> sendRequest(
+            RequestHeaderData header,
+            ApiMessage request,
             boolean hasResponse) {
 
         if (!state.canSendRequests()) {
@@ -434,39 +459,96 @@ public class BackendStateMachine {
                     new IllegalStateException("Server context not available for cluster " + clusterId));
         }
 
+        var apiKey = ApiKeys.forId(request.apiKey());
+
+        // Assign a unique negative correlation ID to avoid conflicts with client requests
+        int correlationId = asyncCorrelationIdGenerator.getAndDecrement();
+        header.setCorrelationId(correlationId);
+        header.setRequestApiKey(apiKey.id);
+
+        LOGGER.debug("{}: Cluster {} sending async {} request with correlationId {}",
+                connectionManager.sessionId(), clusterId, apiKey, correlationId);
+
         // Create promise for the response
-        CompletableFuture<M> responsePromise = new CompletableFuture<>();
+        CompletableFuture<ApiMessage> responsePromise = new CompletableFuture<>();
 
-        // Create internal request frame
-        // Note: This requires InternalRequestFrame to be accessible
-        // For now, we'll forward through the channel and track correlation
-        var apiKey = org.apache.kafka.common.protocol.ApiKeys.forId(request.apiKey());
-
-        LOGGER.debug("{}: Cluster {} sending {} request",
-                connectionManager.sessionId(), clusterId, apiKey);
-
-        // TODO: Implement proper correlation tracking for async requests
-        // For now, write request and complete promise when response arrives
-        // This is a simplified implementation - full implementation needs correlation manager
-
-        io.netty.channel.Channel outboundChannel = serverCtx.channel();
-        if (outboundChannel.isWritable()) {
-            outboundChannel.writeAndFlush(request).addListener(future -> {
-                if (!future.isSuccess()) {
-                    responsePromise.completeExceptionally(future.cause());
-                }
-                else if (!hasResponse) {
-                    responsePromise.complete(null);
-                }
-                // If hasResponse, promise will be completed when response arrives
-            });
+        if (hasResponse) {
+            // Track this request for response matching
+            pendingAsyncRequests.put(correlationId, responsePromise);
         }
-        else {
+
+        // Create a properly framed request
+        DecodedRequestFrame<ApiMessage> frame = new DecodedRequestFrame<>(
+                header.requestApiVersion(),
+                correlationId,
+                hasResponse,
+                header,
+                request);
+
+        // Write the framed request to the backend channel
+        Channel outboundChannel = serverCtx.channel();
+        if (!outboundChannel.isWritable()) {
             return CompletableFuture.failedFuture(
                     new IllegalStateException("Channel not writable for cluster " + clusterId));
         }
+        outboundChannel.writeAndFlush(frame).addListener(future -> {
+            if (!future.isSuccess()) {
+                // Write failed - remove from pending and complete exceptionally
+                pendingAsyncRequests.remove(correlationId);
+                responsePromise.completeExceptionally(future.cause());
+            }
+            else if (!hasResponse) {
+                // No response expected (e.g., acks=0 Produce) - complete immediately
+                responsePromise.complete(null);
+            }
+            // Otherwise, promise will be completed when response arrives
+        });
 
-        return responsePromise;
+        return (CompletableFuture<M>) responsePromise;
+    }
+
+    /**
+     * Try to complete a pending async request with a response.
+     *
+     * @param response the response frame
+     * @return true if this response was for an async request and was handled, false otherwise
+     */
+    @SuppressWarnings("unchecked")
+    boolean tryCompleteAsyncRequest(DecodedResponseFrame<?> response) {
+        int correlationId = response.correlationId();
+
+        // Only negative correlation IDs are for our async requests
+        if (correlationId >= 0) {
+            return false;
+        }
+
+        CompletableFuture<ApiMessage> promise = pendingAsyncRequests.remove(correlationId);
+        if (promise != null) {
+            LOGGER.debug("{}: Cluster {} completing async request with correlationId {}",
+                    connectionManager.sessionId(), clusterId, correlationId);
+            promise.complete(response.body());
+            return true;
+        }
+
+        // Correlation not found - might be stale or error
+        LOGGER.warn("{}: Cluster {} received response for unknown async correlationId {}",
+                connectionManager.sessionId(), clusterId, correlationId);
+        return false;
+    }
+
+    /**
+     * Cancel all pending async requests (e.g., on connection close).
+     */
+    private void cancelPendingAsyncRequests(Throwable cause) {
+        if (!pendingAsyncRequests.isEmpty()) {
+            LOGGER.debug("{}: Cluster {} cancelling {} pending async requests",
+                    connectionManager.sessionId(), clusterId, pendingAsyncRequests.size());
+
+            for (CompletableFuture<ApiMessage> promise : pendingAsyncRequests.values()) {
+                promise.completeExceptionally(cause);
+            }
+            pendingAsyncRequests.clear();
+        }
     }
 
     // ==================== Internal State Management ====================
@@ -537,6 +619,9 @@ public class BackendStateMachine {
 
         @Override
         public void channelInactive(ChannelHandlerContext ctx) {
+            // Cancel pending async requests before notifying state machine
+            stateMachine.cancelPendingAsyncRequests(
+                    new IllegalStateException("Connection closed to cluster " + stateMachine.clusterId()));
             stateMachine.onConnectionInactive();
         }
 
@@ -547,7 +632,15 @@ public class BackendStateMachine {
 
         @Override
         public void channelRead(ChannelHandlerContext ctx, Object msg) {
-            // Forward response to connection manager which routes to frontend
+            // First check if this is a response to an async request (RoutingContext.sendRequest)
+            if (msg instanceof DecodedResponseFrame<?> responseFrame) {
+                if (stateMachine.tryCompleteAsyncRequest(responseFrame)) {
+                    // This response was for an async request - don't forward to frontend
+                    return;
+                }
+            }
+
+            // Not an async request response - forward to connection manager for frontend routing
             stateMachine.connectionManager.onBackendResponse(stateMachine, msg);
         }
 
