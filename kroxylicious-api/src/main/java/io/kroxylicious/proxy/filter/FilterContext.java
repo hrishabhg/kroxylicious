@@ -20,9 +20,9 @@ import org.apache.kafka.common.utils.ByteBufferOutputStream;
 import io.kroxylicious.proxy.authentication.ClientSaslContext;
 import io.kroxylicious.proxy.authentication.Subject;
 import io.kroxylicious.proxy.authentication.User;
-import io.kroxylicious.proxy.config.tls.Tls;
 import io.kroxylicious.proxy.filter.metadata.TopicNameMapping;
 import io.kroxylicious.proxy.filter.metadata.TopicNameMappingException;
+import io.kroxylicious.proxy.net.RoutingContext;
 import io.kroxylicious.proxy.tls.ClientTlsContext;
 
 /**
@@ -267,20 +267,33 @@ public interface FilterContext {
     Subject authenticatedSubject();
 
     /**
-     * Sets the target backend Kafka cluster connection information.
-     * @param bootstrapServers The bootstrap servers address of the target backend Kafka cluster.
-     * @param tlsConfig The TLS configuration to use when connecting to the target backend Kafka cluster, if any.
+     * Get the multi-cluster routing context for advanced routing scenarios.
+     *
+     * <p>This context provides access to:</p>
+     * <ul>
+     *   <li>Available cluster routes</li>
+     *   <li>Sending requests to specific clusters</li>
+     *   <li>Fan-out requests to multiple clusters</li>
+     *   <li>NodeId offset utilities for metadata merging</li>
+     * </ul>
+     *
+     * <p>For single-cluster deployments, this returns a context with exactly one
+     * cluster route accessible via {@link RoutingContext#primaryCluster()} ()}.</p>
+     *
+     * <h4>Example: Conditional Multi-Cluster Handling</h4>
+     * <pre>{@code
+     * MultiClusterRoutingContext routing = context.routingContext();
+     * if (routing.isMultiCluster()) {
+     *     // Fan out metadata to all clusters
+     *     return routing.fanOutRequestToAll(header, request)
+     *         .thenApply(this::mergeResponses);
+     * } else {
+     *     // Single cluster - forward normally
+     *     return context.forwardRequest(header, request);
+     * }
+     * }</pre>
+     *
+     * @return the multi-cluster routing context
      */
-    void setTarget(String bootstrapServers, @Nullable Tls tlsConfig);
-
-    boolean isTargetConnected();
-    /**
-     * @return The TLS configuration to use when connecting to the target backend Kafka cluster, if any.
-     */
-    Optional<Tls> targetTlsConfig();
-
-    /**
-     * @return The bootstrap servers address of the target backend Kafka cluster.
-     */
-    String targetBootstrapServers();
+    RoutingContext routingContext();
 }

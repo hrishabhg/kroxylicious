@@ -8,7 +8,9 @@ package io.kroxylicious.proxy.internal.session;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
 
+import org.apache.kafka.common.protocol.ApiMessage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -400,6 +402,67 @@ public class BackendStateMachine {
 
         LOGGER.debug("{}: Configured pipeline for cluster {}: {}",
                 connectionManager.sessionId(), clusterId, pipeline);
+    }
+
+    // ==================== Async Request/Response ====================
+
+    /**
+     * Send a request to this cluster and receive the response asynchronously.
+     *
+     * @param <M> response message type
+     * @param header request header
+     * @param request request message
+     * @param hasResponse whether a response is expected
+     * @return CompletionStage completing with the response
+     */
+    public <M extends ApiMessage> CompletionStage<M> sendRequest(
+            org.apache.kafka.common.message.RequestHeaderData header,
+            org.apache.kafka.common.protocol.ApiMessage request,
+            boolean hasResponse) {
+
+        if (!state.canSendRequests()) {
+            return CompletableFuture.failedFuture(
+                    new IllegalStateException("Cannot send request to cluster " + clusterId + " in state: " + state));
+        }
+
+        if (serverCtx == null) {
+            return CompletableFuture.failedFuture(
+                    new IllegalStateException("Server context not available for cluster " + clusterId));
+        }
+
+        // Create promise for the response
+        CompletableFuture<M> responsePromise = new CompletableFuture<>();
+
+        // Create internal request frame
+        // Note: This requires InternalRequestFrame to be accessible
+        // For now, we'll forward through the channel and track correlation
+        var apiKey = org.apache.kafka.common.protocol.ApiKeys.forId(request.apiKey());
+
+        LOGGER.debug("{}: Cluster {} sending {} request",
+                connectionManager.sessionId(), clusterId, apiKey);
+
+        // TODO: Implement proper correlation tracking for async requests
+        // For now, write request and complete promise when response arrives
+        // This is a simplified implementation - full implementation needs correlation manager
+
+        io.netty.channel.Channel outboundChannel = serverCtx.channel();
+        if (outboundChannel.isWritable()) {
+            outboundChannel.writeAndFlush(request).addListener(future -> {
+                if (!future.isSuccess()) {
+                    responsePromise.completeExceptionally(future.cause());
+                }
+                else if (!hasResponse) {
+                    responsePromise.complete(null);
+                }
+                // If hasResponse, promise will be completed when response arrives
+            });
+        }
+        else {
+            return CompletableFuture.failedFuture(
+                    new IllegalStateException("Channel not writable for cluster " + clusterId));
+        }
+
+        return responsePromise;
     }
 
     // ==================== Internal State Management ====================

@@ -38,7 +38,6 @@ import io.kroxylicious.proxy.filter.Filter;
 import io.kroxylicious.proxy.filter.FilterAndInvoker;
 import io.kroxylicious.proxy.filter.FilterContext;
 import io.kroxylicious.proxy.filter.FilterResult;
-import io.kroxylicious.proxy.filter.MultiClusterRoutingContext;
 import io.kroxylicious.proxy.filter.RequestFilterResult;
 import io.kroxylicious.proxy.filter.RequestFilterResultBuilder;
 import io.kroxylicious.proxy.filter.ResponseFilterResult;
@@ -50,7 +49,6 @@ import io.kroxylicious.proxy.frame.DecodedResponseFrame;
 import io.kroxylicious.proxy.frame.OpaqueFrame;
 import io.kroxylicious.proxy.frame.OpaqueRequestFrame;
 import io.kroxylicious.proxy.frame.OpaqueResponseFrame;
-import io.kroxylicious.proxy.internal.filter.MultiClusterRoutingContextImpl;
 import io.kroxylicious.proxy.internal.filter.RequestFilterResultBuilderImpl;
 import io.kroxylicious.proxy.internal.filter.ResponseFilterResultBuilderImpl;
 import io.kroxylicious.proxy.internal.session.ClientSessionStateMachine;
@@ -58,6 +56,7 @@ import io.kroxylicious.proxy.internal.session.ClusterConnectionManager;
 import io.kroxylicious.proxy.internal.util.Assertions;
 import io.kroxylicious.proxy.internal.util.ByteBufOutputStream;
 import io.kroxylicious.proxy.model.VirtualClusterModel;
+import io.kroxylicious.proxy.net.RoutingContext;
 import io.kroxylicious.proxy.tls.ClientTlsContext;
 
 import edu.umd.cs.findbugs.annotations.Nullable;
@@ -76,11 +75,8 @@ public class FilterHandler extends ChannelDuplexHandler {
     private final FilterAndInvoker filterAndInvoker;
     private final ClientSessionStateMachine sessionStateMachine;
     private final ClientSubjectManager clientSubjectManager;
-    private final RoutingContextImpl routingContext;
-    private final @Nullable ClusterConnectionManager connectionManager;
-
-    // Lazily created routing context adapter
-    private @Nullable MultiClusterRoutingContext multiClusterRoutingContext;
+    private final RoutingContext routingContext;
+    private final @Nullable ClusterConnectionManager clusterConnectionManager;
 
     private CompletableFuture<Void> writeFuture = CompletableFuture.completedFuture(null);
     private CompletableFuture<Void> readFuture = CompletableFuture.completedFuture(null);
@@ -98,7 +94,7 @@ public class FilterHandler extends ChannelDuplexHandler {
                          Channel inboundChannel,
                          ClientSessionStateMachine sessionStateMachine,
                          ClientSubjectManager clientSubjectManager,
-                         RoutingContextImpl routingContext) {
+                         RoutingContext routingContext) {
         this(filterAndInvoker, timeoutMs, sniHostname, virtualClusterModel, inboundChannel,
                 sessionStateMachine, clientSubjectManager, routingContext, null);
     }
@@ -113,8 +109,8 @@ public class FilterHandler extends ChannelDuplexHandler {
                          Channel inboundChannel,
                          ClientSessionStateMachine sessionStateMachine,
                          ClientSubjectManager clientSubjectManager,
-                         RoutingContextImpl routingContext,
-                         @Nullable ClusterConnectionManager connectionManager) {
+                         RoutingContext routingContext,
+                         @Nullable ClusterConnectionManager clusterConnectionManager) {
         this.filterAndInvoker = Objects.requireNonNull(filterAndInvoker);
         this.timeoutMs = Assertions.requireStrictlyPositive(timeoutMs, "timeout");
         this.sniHostname = sniHostname;
@@ -123,7 +119,7 @@ public class FilterHandler extends ChannelDuplexHandler {
         this.sessionStateMachine = sessionStateMachine;
         this.clientSubjectManager = clientSubjectManager;
         this.routingContext = routingContext;
-        this.connectionManager = connectionManager;
+        this.clusterConnectionManager = clusterConnectionManager;
     }
 
     @Override
@@ -521,16 +517,6 @@ public class FilterHandler extends ChannelDuplexHandler {
         });
     }
 
-    /**
-     * Get or create the multi-cluster routing context.
-     */
-    private RoutingContextImpl getMultiClusterRoutingContext() {
-        if (multiClusterRoutingContext == null) {
-            multiClusterRoutingContext = new MultiClusterRoutingContextImpl(connectionManager);
-        }
-        return multiClusterRoutingContext;
-    }
-
     // ==================== InternalFilterContext ====================
 
     private class InternalFilterContext implements FilterContext {
@@ -700,8 +686,8 @@ public class FilterHandler extends ChannelDuplexHandler {
         }
 
         @Override
-        public RoutingContextImpl routingContext() {
-            return getMultiClusterRoutingContext();
+        public RoutingContext routingContext() {
+            return routingContext;
         }
     }
 
