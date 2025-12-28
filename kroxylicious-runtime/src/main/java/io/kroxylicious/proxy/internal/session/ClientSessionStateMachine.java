@@ -340,17 +340,17 @@ public class ClientSessionStateMachine {
     }
 
     void onBackendWritable(BackendStateMachine backend) {
-        // Backend can accept more data - relieve client backpressure
         // check if all connected backends are writable
-        AtomicBoolean allBackendsWritable = new AtomicBoolean(true);
+        boolean allBackendsWritable = true;
         if (connectionManager != null) {
-            connectionManager.allBackends().forEach(backendStateMachine -> {
-                if (backendStateMachine.isConnected() && backendStateMachine.isReadsBlocked()) {
-                    allBackendsWritable.set(false);
+            for (BackendStateMachine backendStateMachine : connectionManager.allBackends()) {
+                if (backendStateMachine.isConnected() && backendStateMachine.isChannelWritable()) {
+                    allBackendsWritable = false;
+                    break;
                 }
-            });
+            }
         }
-        if (allBackendsWritable.get() && clientReadsBlocked) {
+        if (allBackendsWritable && clientReadsBlocked) {
             clientReadsBlocked = false;
             if (clientBackpressureTimer != null) {
                 clientBackpressureTimer.stop(clientToProxyBackpressureTimer);

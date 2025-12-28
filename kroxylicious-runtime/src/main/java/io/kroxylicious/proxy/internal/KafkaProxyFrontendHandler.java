@@ -327,7 +327,7 @@ public class KafkaProxyFrontendHandler
         }
 
         // Initialize routing context with default target
-        this.routingContext = new RoutingContextImpl(virtualClusterModel.targetCluster());
+        this.routingContext = new RoutingContextImpl(this.sessionStateMachine.connectionManager());
 
         // Add filters to client pipeline
         addFiltersToPipeline(netFilter.getFilterAndInvokerCollection(),
@@ -369,9 +369,10 @@ public class KafkaProxyFrontendHandler
         this.connectionManager = connectionManager;
         this.filters = filters;
 
-        if (routingContext != null) {
-            routingContext.connected();
-        }
+        // todo: check if still important
+        // if (routingContext != null) {
+        //    routingContext.connected();
+        // }
 
         LOGGER.debug("{}: Connecting to backend broker {} using filters {}",
                 sessionStateMachine.sessionId(), remote, filters);
@@ -412,9 +413,9 @@ public class KafkaProxyFrontendHandler
         this.connectionManager = connectionManager;
         this.filters = filters;
 
-        if (routingContext != null) {
-            routingContext.connected();
-        }
+        // if (routingContext != null) {
+        //    routingContext.connected();
+        // }
 
         LOGGER.info("{}: Connecting to {} clusters using filters {}",
                 sessionStateMachine.sessionId(), clusters.size(), filters);
@@ -422,7 +423,7 @@ public class KafkaProxyFrontendHandler
         Channel inboundChannel = clientCtx().channel();
 
         // Connect all clusters concurrently
-        connectionManager.connectAll(inboundChannel, sslContexts)
+        connectionManager.connectAll(inboundChannel)
                 .whenComplete((v, t) -> {
                     if (t != null) {
                         LOGGER.warn("{}: Failed to connect to all clusters: {}",
@@ -711,8 +712,7 @@ public class KafkaProxyFrontendHandler
                             inboundChannel,
                             sessionStateMachine,
                             clientSubjectManager,
-                            routingContext,
-                            connectionManager));
+                            routingContext));
         }
     }
 

@@ -358,6 +358,10 @@ public class BackendStateMachine {
         return readsBlocked;
     }
 
+    public boolean isChannelWritable() {
+        return serverCtx != null && serverCtx.channel().isWritable();
+    }
+
     // ==================== Pipeline Configuration ====================
 
     @VisibleForTesting

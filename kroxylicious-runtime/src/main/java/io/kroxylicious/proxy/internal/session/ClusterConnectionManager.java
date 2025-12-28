@@ -27,6 +27,7 @@ import io.netty.handler.ssl.SslContext;
 
 import io.kroxylicious.proxy.config.TargetCluster;
 import io.kroxylicious.proxy.internal.util.Metrics;
+import io.kroxylicious.proxy.model.VirtualClusterModel;
 
 import edu.umd.cs.findbugs.annotations.Nullable;
 
@@ -241,18 +242,14 @@ public class ClusterConnectionManager {
      * Connect to all registered clusters concurrently.
      *
      * @param inboundChannel client channel
-     * @param sslContexts map of clusterId to SSL context
      * @return future that completes when ALL clusters are connected
      */
-    public CompletableFuture<Void> connectAll(
-            Channel inboundChannel,
-            Map<String, Optional<SslContext>> sslContexts) {
+    public CompletableFuture<Void> connectAll(Channel inboundChannel) {
 
         List<CompletableFuture<BackendStateMachine>> futures = new ArrayList<>();
 
         for (BackendStateMachine backend : backends.values()) {
-            Optional<SslContext> ssl = sslContexts.getOrDefault(
-                    backend.clusterId(), Optional.empty());
+            Optional<SslContext> ssl = VirtualClusterModel.buildUpstreamSslContext(backend.targetCluster().tls());
             futures.add(backend.connect(inboundChannel, ssl));
         }
 
@@ -277,7 +274,7 @@ public class ClusterConnectionManager {
             futures.add(future);
 
             // Complete result on first success
-            future.thenAccept(b -> result.complete(b));
+            future.thenAccept(result::complete);
         }
 
         // If all fail, complete exceptionally

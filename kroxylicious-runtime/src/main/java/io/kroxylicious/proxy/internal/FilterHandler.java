@@ -76,28 +76,12 @@ public class FilterHandler extends ChannelDuplexHandler {
     private final ClientSessionStateMachine sessionStateMachine;
     private final ClientSubjectManager clientSubjectManager;
     private final RoutingContext routingContext;
-    private final @Nullable ClusterConnectionManager clusterConnectionManager;
 
     private CompletableFuture<Void> writeFuture = CompletableFuture.completedFuture(null);
     private CompletableFuture<Void> readFuture = CompletableFuture.completedFuture(null);
     private @Nullable ChannelHandlerContext ctx;
     private @Nullable PromiseFactory promiseFactory;
     private static final AtomicBoolean deprecationWarningEmitted = new AtomicBoolean(false);
-
-    /**
-     * Constructor for single-cluster mode (backward compatible).
-     */
-    public FilterHandler(FilterAndInvoker filterAndInvoker,
-                         long timeoutMs,
-                         @Nullable String sniHostname,
-                         VirtualClusterModel virtualClusterModel,
-                         Channel inboundChannel,
-                         ClientSessionStateMachine sessionStateMachine,
-                         ClientSubjectManager clientSubjectManager,
-                         RoutingContext routingContext) {
-        this(filterAndInvoker, timeoutMs, sniHostname, virtualClusterModel, inboundChannel,
-                sessionStateMachine, clientSubjectManager, routingContext, null);
-    }
 
     /**
      * Constructor with multi-cluster support.
@@ -109,8 +93,7 @@ public class FilterHandler extends ChannelDuplexHandler {
                          Channel inboundChannel,
                          ClientSessionStateMachine sessionStateMachine,
                          ClientSubjectManager clientSubjectManager,
-                         RoutingContext routingContext,
-                         @Nullable ClusterConnectionManager clusterConnectionManager) {
+                         RoutingContext routingContext) {
         this.filterAndInvoker = Objects.requireNonNull(filterAndInvoker);
         this.timeoutMs = Assertions.requireStrictlyPositive(timeoutMs, "timeout");
         this.sniHostname = sniHostname;
@@ -119,7 +102,6 @@ public class FilterHandler extends ChannelDuplexHandler {
         this.sessionStateMachine = sessionStateMachine;
         this.clientSubjectManager = clientSubjectManager;
         this.routingContext = routingContext;
-        this.clusterConnectionManager = clusterConnectionManager;
     }
 
     @Override
@@ -634,50 +616,54 @@ public class FilterHandler extends ChannelDuplexHandler {
         }
 
         @Override
+        @SuppressWarnings("removal")
         public <M extends ApiMessage> CompletionStage<M> sendRequest(RequestHeaderData header,
                                                                      ApiMessage request) {
-            Objects.requireNonNull(header);
-            Objects.requireNonNull(request);
-
-            var apiKey = ApiKeys.forId(request.apiKey());
-            header.setRequestApiKey(apiKey.id);
-            header.setCorrelationId(-1);
-
-            if (!apiKey.isVersionSupported(header.requestApiVersion())) {
-                throw new IllegalArgumentException(
-                        "Filter '%s': apiKey %s does not support version %d. the supported version range for this api key is %d...%d (inclusive)."
-                                .formatted(filterDescriptor(), apiKey, header.requestApiVersion(), apiKey.oldestVersion(), apiKey.latestVersion()));
-            }
-
-            var hasResponse = apiKey != ApiKeys.PRODUCE || ((ProduceRequestData) request).acks() != 0;
-            CompletableFuture<M> filterPromise = promiseFactory.newTimeLimitedPromise(
-                    () -> "Asynchronous %s request made by filter '%s' failed to complete within %s ms.".formatted(apiKey, filterDescriptor(), timeoutMs));
-            var frame = new InternalRequestFrame<>(
-                    header.requestApiVersion(), header.correlationId(), hasResponse,
-                    filterAndInvoker.filter(), filterPromise, header, request);
-
-            if (LOGGER.isDebugEnabled()) {
-                LOGGER.debug("{}: Filter '{}' sending request: {}", FilterHandler.this.channelDescriptor(), filterDescriptor(), msgDescriptor(frame));
-            }
-            ChannelPromise writePromise = ctx.channel().newPromise();
-            ctx.writeAndFlush(frame, writePromise);
-
-            if (!hasResponse) {
-                // Complete the filter promise for an ack-less Produce
-                // based on the success of the channel write
-                // (for all other requests the filter promise will be completed
-                // when handling the response).
-                writePromise.addListener(f -> {
-                    if (f.isSuccess()) {
-                        filterPromise.complete(null);
-                    }
-                    else {
-                        filterPromise.completeExceptionally(f.cause());
-                    }
-                });
-            }
-
-            return filterPromise.minimalCompletionStage();
+            LOGGER.debug("{}: Filter '{}' using deprecated sendRequest - delegating to routingContext()",
+                    FilterHandler.this.channelDescriptor(), filterDescriptor());
+            return routingContext().sendRequest(routingContext.primaryClusterId(), header, request);
+//            Objects.requireNonNull(header);
+//            Objects.requireNonNull(request);
+//
+//            var apiKey = ApiKeys.forId(request.apiKey());
+//            header.setRequestApiKey(apiKey.id);
+//            header.setCorrelationId(-1);
+//
+//            if (!apiKey.isVersionSupported(header.requestApiVersion())) {
+//                throw new IllegalArgumentException(
+//                        "Filter '%s': apiKey %s does not support version %d. the supported version range for this api key is %d...%d (inclusive)."
+//                                .formatted(filterDescriptor(), apiKey, header.requestApiVersion(), apiKey.oldestVersion(), apiKey.latestVersion()));
+//            }
+//
+//            var hasResponse = apiKey != ApiKeys.PRODUCE || ((ProduceRequestData) request).acks() != 0;
+//            CompletableFuture<M> filterPromise = promiseFactory.newTimeLimitedPromise(
+//                    () -> "Asynchronous %s request made by filter '%s' failed to complete within %s ms.".formatted(apiKey, filterDescriptor(), timeoutMs));
+//            var frame = new InternalRequestFrame<>(
+//                    header.requestApiVersion(), header.correlationId(), hasResponse,
+//                    filterAndInvoker.filter(), filterPromise, header, request);
+//
+//            if (LOGGER.isDebugEnabled()) {
+//                LOGGER.debug("{}: Filter '{}' sending request: {}", FilterHandler.this.channelDescriptor(), filterDescriptor(), msgDescriptor(frame));
+//            }
+//            ChannelPromise writePromise = ctx.channel().newPromise();
+//            ctx.writeAndFlush(frame, writePromise);
+//
+//            if (!hasResponse) {
+//                // Complete the filter promise for an ack-less Produce
+//                // based on the success of the channel write
+//                // (for all other requests the filter promise will be completed
+//                // when handling the response).
+//                writePromise.addListener(f -> {
+//                    if (f.isSuccess()) {
+//                        filterPromise.complete(null);
+//                    }
+//                    else {
+//                        filterPromise.completeExceptionally(f.cause());
+//                    }
+//                });
+//            }
+//
+//            return filterPromise.minimalCompletionStage();
         }
 
         @Override
@@ -685,6 +671,10 @@ public class FilterHandler extends ChannelDuplexHandler {
             return new TopicNameRetriever(this, Objects.requireNonNull(ctx).executor()).topicNames(topicIds);
         }
 
+        /**
+         * routing context is required to avail the filter the ability to send out-of-band requests to specific clusters
+         * @return the routing context
+         */
         @Override
         public RoutingContext routingContext() {
             return routingContext;
