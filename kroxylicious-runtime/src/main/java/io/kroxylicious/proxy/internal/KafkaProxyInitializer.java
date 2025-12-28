@@ -292,7 +292,7 @@ public class KafkaProxyInitializer extends ChannelInitializer<Channel> {
         }
 
         @Override
-        public void selectServer(NetFilter.NetFilterContext context, @Nullable RoutingContext routingContext) {
+        public void selectServer(NetFilter.NetFilterContext context, @Nullable RoutingContextImpl routingContext) {
             LOGGER.info("{}: Selecting NetFilter.NetFilter context: {}", ch, context);
             // var filters = getFilterAndInvokerCollection();
 

@@ -184,7 +184,8 @@ public class BackendStateMachine {
                 if (sslContext.isEmpty()) {
                     onConnectionActive();
                 }
-            } else {
+            }
+            else {
                 onConnectionFailed(f.cause());
             }
         });
@@ -206,7 +207,8 @@ public class BackendStateMachine {
 
             connectionFuture.complete(this);
             connectionManager.onBackendConnected(this);
-        } else {
+        }
+        else {
             LOGGER.warn("{}: Unexpected onConnectionActive in state {}",
                     connectionManager.sessionId(), state);
         }
@@ -252,7 +254,8 @@ public class BackendStateMachine {
         if (state instanceof BackendConnectionState.Connected connected) {
             setState(connected.toClosed());
             connectionManager.onBackendError(this, cause);
-        } else if (state instanceof BackendConnectionState.Connecting connecting) {
+        }
+        else if (state instanceof BackendConnectionState.Connecting connecting) {
             onConnectionFailed(cause);
         }
     }
@@ -270,7 +273,8 @@ public class BackendStateMachine {
 
         if (state instanceof BackendConnectionState.Connected connected) {
             setState(connected.toClosed());
-        } else if (state instanceof BackendConnectionState.Connecting) {
+        }
+        else if (state instanceof BackendConnectionState.Connecting) {
             setState(BackendConnectionState.Closed.INSTANCE);
         }
 
@@ -298,7 +302,8 @@ public class BackendStateMachine {
         Channel outboundChannel = serverCtx.channel();
         if (outboundChannel.isWritable()) {
             outboundChannel.write(msg, serverCtx.voidPromise());
-        } else {
+        }
+        else {
             outboundChannel.writeAndFlush(msg, serverCtx.voidPromise());
         }
     }
@@ -319,7 +324,7 @@ public class BackendStateMachine {
     // ==================== Backpressure ====================
 
     /**
-     * Apply backpressure - stop reading from this backend.
+     * Apply backpressure - stop reading from this backend.““
      */
     public void applyBackpressure() {
         if (!readsBlocked && serverCtx != null) {

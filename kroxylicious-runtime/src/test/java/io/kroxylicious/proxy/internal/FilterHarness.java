@@ -89,7 +89,7 @@ public abstract class FilterHarness {
         ProxyChannelStateMachine channelStateMachine = new ProxyChannelStateMachine(testVirtualCluster.getClusterName(), null);
 
         clientSubjectManager = new ClientSubjectManager();
-        RoutingContext routingContext = new RoutingContext(targetCluster);
+        RoutingContextImpl routingContext = new RoutingContextImpl(targetCluster);
         var filterHandlers = Arrays.stream(filters)
                 .collect(Collector.of(ArrayDeque<Filter>::new, ArrayDeque::addFirst, (d1, d2) -> {
                     d2.addAll(d1);

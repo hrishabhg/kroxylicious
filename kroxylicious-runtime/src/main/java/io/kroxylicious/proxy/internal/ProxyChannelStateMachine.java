@@ -71,7 +71,7 @@ import static org.slf4j.LoggerFactory.getLogger;
  *      ↓ frontend.{@link KafkaProxyFrontendHandler#channelRead(ChannelHandlerContext, Object) channelRead} receives any other KRPC request
  *     {@link ProxyChannelState.SelectingServer SelectingServer} ╌╌╌╌⤍ <b>error</b> ╌╌╌╌⤍
  *      │
- *      ↓ netFilter.{@link NetFilter#selectServer(NetFilter.NetFilterContext, RoutingContext) selectServer} calls frontend.{@link KafkaProxyFrontendHandler#initiateConnect(HostPort, List) initiateConnect}
+ *      ↓ netFilter.{@link NetFilter#selectServer(NetFilter.NetFilterContext, RoutingContextImpl) selectServer} calls frontend.{@link KafkaProxyFrontendHandler#initiateConnect(HostPort, List) initiateConnect}
  *     {@link ProxyChannelState.Connecting Connecting} ╌╌╌╌⤍ <b>error</b> ╌╌╌╌⤍
  *      │
  *      ↓

@@ -34,12 +34,11 @@ import io.netty.channel.ChannelPromise;
 import io.kroxylicious.proxy.authentication.ClientSaslContext;
 import io.kroxylicious.proxy.authentication.Subject;
 import io.kroxylicious.proxy.authentication.User;
-import io.kroxylicious.proxy.config.TargetCluster;
-import io.kroxylicious.proxy.config.tls.Tls;
 import io.kroxylicious.proxy.filter.Filter;
 import io.kroxylicious.proxy.filter.FilterAndInvoker;
 import io.kroxylicious.proxy.filter.FilterContext;
 import io.kroxylicious.proxy.filter.FilterResult;
+import io.kroxylicious.proxy.filter.MultiClusterRoutingContext;
 import io.kroxylicious.proxy.filter.RequestFilterResult;
 import io.kroxylicious.proxy.filter.RequestFilterResultBuilder;
 import io.kroxylicious.proxy.filter.ResponseFilterResult;
@@ -51,8 +50,11 @@ import io.kroxylicious.proxy.frame.DecodedResponseFrame;
 import io.kroxylicious.proxy.frame.OpaqueFrame;
 import io.kroxylicious.proxy.frame.OpaqueRequestFrame;
 import io.kroxylicious.proxy.frame.OpaqueResponseFrame;
+import io.kroxylicious.proxy.internal.filter.MultiClusterRoutingContextImpl;
 import io.kroxylicious.proxy.internal.filter.RequestFilterResultBuilderImpl;
 import io.kroxylicious.proxy.internal.filter.ResponseFilterResultBuilderImpl;
+import io.kroxylicious.proxy.internal.session.ClientSessionStateMachine;
+import io.kroxylicious.proxy.internal.session.ClusterConnectionManager;
 import io.kroxylicious.proxy.internal.util.Assertions;
 import io.kroxylicious.proxy.internal.util.ByteBufOutputStream;
 import io.kroxylicious.proxy.model.VirtualClusterModel;
@@ -72,31 +74,56 @@ public class FilterHandler extends ChannelDuplexHandler {
     private final VirtualClusterModel virtualClusterModel;
     private final Channel inboundChannel;
     private final FilterAndInvoker filterAndInvoker;
-    private final ProxyChannelStateMachine proxyChannelStateMachine;
+    private final ClientSessionStateMachine sessionStateMachine;
     private final ClientSubjectManager clientSubjectManager;
+    private final RoutingContextImpl routingContext;
+    private final @Nullable ClusterConnectionManager connectionManager;
+
+    // Lazily created routing context adapter
+    private @Nullable MultiClusterRoutingContext multiClusterRoutingContext;
+
     private CompletableFuture<Void> writeFuture = CompletableFuture.completedFuture(null);
     private CompletableFuture<Void> readFuture = CompletableFuture.completedFuture(null);
     private @Nullable ChannelHandlerContext ctx;
     private @Nullable PromiseFactory promiseFactory;
-    private final RoutingContext routingContext;
     private static final AtomicBoolean deprecationWarningEmitted = new AtomicBoolean(false);
 
+    /**
+     * Constructor for single-cluster mode (backward compatible).
+     */
     public FilterHandler(FilterAndInvoker filterAndInvoker,
                          long timeoutMs,
                          @Nullable String sniHostname,
                          VirtualClusterModel virtualClusterModel,
                          Channel inboundChannel,
-                         ProxyChannelStateMachine proxyChannelStateMachine,
+                         ClientSessionStateMachine sessionStateMachine,
                          ClientSubjectManager clientSubjectManager,
-                         RoutingContext routingContext) {
+                         RoutingContextImpl routingContext) {
+        this(filterAndInvoker, timeoutMs, sniHostname, virtualClusterModel, inboundChannel,
+                sessionStateMachine, clientSubjectManager, routingContext, null);
+    }
+
+    /**
+     * Constructor with multi-cluster support.
+     */
+    public FilterHandler(FilterAndInvoker filterAndInvoker,
+                         long timeoutMs,
+                         @Nullable String sniHostname,
+                         VirtualClusterModel virtualClusterModel,
+                         Channel inboundChannel,
+                         ClientSessionStateMachine sessionStateMachine,
+                         ClientSubjectManager clientSubjectManager,
+                         RoutingContextImpl routingContext,
+                         @Nullable ClusterConnectionManager connectionManager) {
         this.filterAndInvoker = Objects.requireNonNull(filterAndInvoker);
         this.timeoutMs = Assertions.requireStrictlyPositive(timeoutMs, "timeout");
         this.sniHostname = sniHostname;
         this.virtualClusterModel = virtualClusterModel;
         this.inboundChannel = inboundChannel;
-        this.proxyChannelStateMachine = proxyChannelStateMachine;
+        this.sessionStateMachine = sessionStateMachine;
         this.clientSubjectManager = clientSubjectManager;
         this.routingContext = routingContext;
+        this.connectionManager = connectionManager;
     }
 
     @Override
@@ -120,7 +147,6 @@ public class FilterHandler extends ChannelDuplexHandler {
     @Override
     public void write(ChannelHandlerContext ctx, Object msg, ChannelPromise promise) throws Exception {
         if (msg instanceof InternalResponseFrame<?> decodedFrame) {
-            // jump the queue, let responses to asynchronous requests flow back to their sender
             if (decodedFrame.isRecipient(filterAndInvoker.filter())) {
                 completeInternalResponse(decodedFrame);
             }
@@ -351,7 +377,7 @@ public class FilterHandler extends ChannelDuplexHandler {
         if (LOGGER.isWarnEnabled()) {
             var direction = decodedFrame.header() instanceof RequestHeaderData ? "request" : "response";
             LOGGER.atWarn().setMessage("{}: Filter '{}' for {} {} ended exceptionally - closing connection. Cause message {}")
-                    .addArgument(proxyChannelStateMachine.sessionId())
+                    .addArgument(sessionStateMachine.sessionId())
                     .addArgument(direction)
                     .addArgument(filterDescriptor())
                     .addArgument(decodedFrame.apiKey())
@@ -495,6 +521,18 @@ public class FilterHandler extends ChannelDuplexHandler {
         });
     }
 
+    /**
+     * Get or create the multi-cluster routing context.
+     */
+    private RoutingContextImpl getMultiClusterRoutingContext() {
+        if (multiClusterRoutingContext == null) {
+            multiClusterRoutingContext = new MultiClusterRoutingContextImpl(connectionManager);
+        }
+        return multiClusterRoutingContext;
+    }
+
+    // ==================== InternalFilterContext ====================
+
     private class InternalFilterContext implements FilterContext {
 
         private final DecodedFrame<?, ?> decodedFrame;
@@ -502,29 +540,6 @@ public class FilterHandler extends ChannelDuplexHandler {
         @Override
         public Subject authenticatedSubject() {
             return clientSubjectManager.authenticatedSubject();
-        }
-
-        @Override
-        public void setTarget(String bootstrapServers, @Nullable Tls tlsConfig) {
-            if (routingContext.isConnected()) {
-                throw new IllegalStateException("Cannot set target when already connected");
-            }
-            routingContext.setTargetCluster(new TargetCluster(bootstrapServers, tlsConfig == null ? Optional.empty() : Optional.of(tlsConfig)));
-        }
-
-        @Override
-        public boolean isTargetConnected() {
-            return routingContext.isConnected();
-        }
-
-        @Override
-        public Optional<Tls> targetTlsConfig() {
-            return routingContext.targetCluster().tls();
-        }
-
-        @Override
-        public String targetBootstrapServers() {
-            return routingContext.targetCluster().bootstrapServers();
         }
 
         InternalFilterContext(DecodedFrame<?, ?> decodedFrame) {
@@ -538,7 +553,7 @@ public class FilterHandler extends ChannelDuplexHandler {
 
         @Override
         public String sessionId() {
-            return proxyChannelStateMachine.sessionId();
+            return sessionStateMachine.sessionId();
         }
 
         @Override
@@ -554,6 +569,7 @@ public class FilterHandler extends ChannelDuplexHandler {
             return sniHostname;
         }
 
+        @Override
         public String getVirtualClusterName() {
             return virtualClusterModel.getClusterName();
         }
@@ -683,6 +699,10 @@ public class FilterHandler extends ChannelDuplexHandler {
             return new TopicNameRetriever(this, Objects.requireNonNull(ctx).executor()).topicNames(topicIds);
         }
 
+        @Override
+        public RoutingContextImpl routingContext() {
+            return getMultiClusterRoutingContext();
+        }
     }
 
 }

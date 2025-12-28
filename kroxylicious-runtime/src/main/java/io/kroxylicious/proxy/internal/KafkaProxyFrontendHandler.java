@@ -122,7 +122,7 @@ public class KafkaProxyFrontendHandler
     private int progressionLatch = -1;
 
     // Routing context for filters
-    private @Nullable RoutingContext routingContext;
+    private @Nullable RoutingContextImpl routingContext;
 
     // Filters applied to this session
     private @Nullable List<FilterAndInvoker> filters;
@@ -326,7 +326,7 @@ public class KafkaProxyFrontendHandler
         }
 
         // Initialize routing context with default target
-        this.routingContext = new RoutingContext(virtualClusterModel.targetCluster());
+        this.routingContext = new RoutingContextImpl(virtualClusterModel.targetCluster());
 
         // Add filters to client pipeline
         addFiltersToPipeline(netFilter.getFilterAndInvokerCollection(),
@@ -695,7 +695,7 @@ public class KafkaProxyFrontendHandler
             List<FilterAndInvoker> filters,
             ChannelPipeline pipeline,
             Channel inboundChannel,
-            RoutingContext routingContext) {
+            RoutingContextImpl routingContext) {
 
         int num = 0;
         for (var protocolFilter : filters) {

@@ -10,6 +10,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Function;
 
 import org.apache.kafka.common.errors.ApiException;
@@ -340,7 +341,16 @@ public class ClientSessionStateMachine {
 
     void onBackendWritable(BackendStateMachine backend) {
         // Backend can accept more data - relieve client backpressure
-        if (clientReadsBlocked) {
+        // check if all connected backends are writable
+        AtomicBoolean allBackendsWritable = new AtomicBoolean(true);
+        if (connectionManager != null) {
+            connectionManager.allBackends().forEach(backendStateMachine -> {
+                if (backendStateMachine.isConnected() && backendStateMachine.isReadsBlocked()) {
+                    allBackendsWritable.set(false);
+                }
+            });
+        }
+        if (allBackendsWritable.get() && clientReadsBlocked) {
             clientReadsBlocked = false;
             if (clientBackpressureTimer != null) {
                 clientBackpressureTimer.stop(clientToProxyBackpressureTimer);

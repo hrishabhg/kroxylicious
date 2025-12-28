@@ -119,7 +119,7 @@ class KafkaProxyFrontendHandlerMockCollaboratorsTest {
         handler.inSelectingServer();
 
         // Then
-        verify(netFilter).selectServer(handler, any(RoutingContext.class));
+        verify(netFilter).selectServer(handler, any(RoutingContextImpl.class));
         verify(proxyChannelStateMachine).assertIsConnecting(anyString());
     }
 

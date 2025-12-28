@@ -590,7 +590,7 @@ class KafkaProxyFrontendHandlerTest {
         assertThat(proxyChannelStateMachine.state()).isInstanceOf(ProxyChannelState.Closed.class);
     }
 
-    private void getNetFilter(NetFilter.NetFilterContext netFilterContext, RoutingContext routingContext) {
+    private void getNetFilter(NetFilter.NetFilterContext netFilterContext, RoutingContextImpl routingContext) {
         connectContext.set(netFilterContext);
         netFilterContext.initiateConnect(new HostPort(CLUSTER_HOST, CLUSTER_PORT), List.of());
     }

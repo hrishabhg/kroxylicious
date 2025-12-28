@@ -162,7 +162,7 @@ sealed interface ProxyChannelState permits
 
     /**
      * A channel to the server is now required, but
-     * {@link io.kroxylicious.proxy.filter.NetFilter#selectServer(NetFilter.NetFilterContext, RoutingContext)}
+     * {@link io.kroxylicious.proxy.filter.NetFilter#selectServer(NetFilter.NetFilterContext, RoutingContextImpl)}
      * has not yet been called.
      * @param haProxyMessage
      * @param clientSoftwareName
