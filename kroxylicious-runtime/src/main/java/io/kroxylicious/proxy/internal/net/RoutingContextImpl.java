@@ -45,7 +45,7 @@ public class RoutingContextImpl implements RoutingContext {
     /**
      * Create a multi-cluster routing context.
      *
-     * @param connectionManager the connection manager (may be null for single-cluster backward compat)
+     * @param connectionManager the connection manager (maybe null for single-cluster backward compat)
      */
     public RoutingContextImpl(@Nullable ClusterConnectionManager connectionManager) {
         this.connectionManager = connectionManager;

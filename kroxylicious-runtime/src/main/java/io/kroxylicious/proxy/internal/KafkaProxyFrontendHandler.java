@@ -10,6 +10,7 @@ import java.io.UncheckedIOException;
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -400,13 +401,11 @@ public class KafkaProxyFrontendHandler
      * Called when connecting to multiple clusters.
      *
      * @param clusters map of clusterId to target configuration
-     * @param sslContexts map of clusterId to TLS context
      * @param filters protocol filters
      * @param connectionManager the connection manager (will have multiple clusters)
      */
     public void inMultiClusterConnecting(
             Map<String, TargetCluster> clusters,
-            Map<String, Optional<SslContext>> sslContexts,
             List<FilterAndInvoker> filters,
             ClusterConnectionManager connectionManager) {
 
@@ -647,7 +646,7 @@ public class KafkaProxyFrontendHandler
         }
 
         // Convert HostPort map to TargetCluster map
-        Map<String, TargetCluster> clusters = new java.util.HashMap<>();
+        Map<String, TargetCluster> clusters = new HashMap<>();
         for (var entry : remotes.entrySet()) {
             HostPort hp = entry.getValue();
             Optional<SslContext> ssl = sslContexts.getOrDefault(entry.getKey(), Optional.empty());
@@ -656,7 +655,7 @@ public class KafkaProxyFrontendHandler
                     ssl.isPresent() ? Optional.empty() : Optional.empty())); // TLS handled separately
         }
 
-        sessionStateMachine.onNetFilterInitiateMultiClusterConnect(clusters, sslContexts, filters,
+        sessionStateMachine.onNetFilterInitiateMultiClusterConnect(clusters, filters,
                 virtualClusterModel, netFilter);
     }
 

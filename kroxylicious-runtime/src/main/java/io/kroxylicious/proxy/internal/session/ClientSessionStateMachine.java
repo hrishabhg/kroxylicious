@@ -254,7 +254,6 @@ public class ClientSessionStateMachine {
      */
     public void onNetFilterInitiateMultiClusterConnect(
             Map<String, TargetCluster> clusters,
-            Map<String, Optional<SslContext>> sslContexts,
             List<FilterAndInvoker> filters,
             VirtualClusterModel virtualCluster,
             NetFilter netFilter) {
@@ -285,7 +284,7 @@ public class ClientSessionStateMachine {
 
         // Connect all clusters
         Objects.requireNonNull(frontendHandler).inMultiClusterConnecting(
-                clusters, sslContexts, filters, connectionManager);
+                clusters, filters, connectionManager);
     }
 
     // ==================== Callbacks from ClusterConnectionManager ====================
