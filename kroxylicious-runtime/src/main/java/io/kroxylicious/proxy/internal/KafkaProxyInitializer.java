@@ -47,8 +47,10 @@ import io.kroxylicious.proxy.internal.net.EndpointBinding;
 import io.kroxylicious.proxy.internal.net.EndpointBindingResolver;
 import io.kroxylicious.proxy.internal.net.EndpointGateway;
 import io.kroxylicious.proxy.internal.net.EndpointReconciler;
+import io.kroxylicious.proxy.internal.session.ClientSessionStateMachine;
 import io.kroxylicious.proxy.internal.util.Metrics;
 import io.kroxylicious.proxy.model.VirtualClusterModel;
+import io.kroxylicious.proxy.net.RoutingContext;
 import io.kroxylicious.proxy.service.HostPort;
 import io.kroxylicious.proxy.tag.VisibleForTesting;
 
@@ -227,8 +229,8 @@ public class KafkaProxyInitializer extends ChannelInitializer<Channel> {
                 new ApiVersionsIntersectFilter(apiVersionsService),
                 new ApiVersionsDowngradeFilter(apiVersionsService));
 
-        ProxyChannelStateMachine proxyChannelStateMachine = new ProxyChannelStateMachine(virtualCluster.getClusterName(), binding.nodeId());
-        var frontendHandler = new KafkaProxyFrontendHandler(netFilter, dp, virtualCluster.subjectBuilder(pfr), binding, proxyChannelStateMachine);
+        ClientSessionStateMachine clientChannelStateMachine = new ClientSessionStateMachine(virtualCluster.getClusterName(), binding.nodeId());
+        var frontendHandler = new KafkaProxyFrontendHandler(netFilter, dp, virtualCluster.subjectBuilder(pfr), binding, clientChannelStateMachine);
 
         pipeline.addLast("netHandler", frontendHandler);
         addLoggingErrorHandler(pipeline);
@@ -292,7 +294,7 @@ public class KafkaProxyInitializer extends ChannelInitializer<Channel> {
         }
 
         @Override
-        public void selectServer(NetFilter.NetFilterContext context, @Nullable RoutingContextImpl routingContext) {
+        public void selectServer(NetFilter.NetFilterContext context, @Nullable RoutingContext routingContext) {
             LOGGER.info("{}: Selecting NetFilter.NetFilter context: {}", ch, context);
             // var filters = getFilterAndInvokerCollection();
 
@@ -307,9 +309,10 @@ public class KafkaProxyInitializer extends ChannelInitializer<Channel> {
                 }
             }
             else {
-                target = routingContext.targetCluster().bootstrapServer();
+                // todo: leverage target cluster bootstrap server selection strategy
+                target = HostPort.parse(routingContext.primaryCluster().bootstrapServers());
                 targetSslContext = VirtualClusterModel.buildUpstreamSslContext(
-                        routingContext.targetCluster().tls());
+                        routingContext.primaryCluster().tls());
             }
 
             context.initiateConnect(target, targetSslContext, cachedFilters);

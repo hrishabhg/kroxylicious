@@ -11,7 +11,7 @@ import java.util.Optional;
 
 import io.netty.handler.ssl.SslContext;
 
-import io.kroxylicious.proxy.internal.RoutingContextImpl;
+import io.kroxylicious.proxy.net.RoutingContext;
 import io.kroxylicious.proxy.service.HostPort;
 
 import edu.umd.cs.findbugs.annotations.Nullable;
@@ -28,7 +28,7 @@ public interface NetFilter {
      * by invoking {@link NetFilterContext#initiateConnect(HostPort, List)}.
      * @param context The context.
      */
-    void selectServer(NetFilterContext context, RoutingContextImpl routingContext);
+    void selectServer(NetFilterContext context, RoutingContext routingContext);
 
     default List<FilterAndInvoker> getFilterAndInvokerCollection() {
         return List.of();
