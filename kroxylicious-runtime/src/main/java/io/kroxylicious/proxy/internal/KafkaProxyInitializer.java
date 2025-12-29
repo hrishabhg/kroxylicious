@@ -42,6 +42,7 @@ import io.kroxylicious.proxy.internal.filter.EagerMetadataLearner;
 import io.kroxylicious.proxy.internal.filter.NettyFilterContext;
 import io.kroxylicious.proxy.internal.filter.PrincipalRouter;
 import io.kroxylicious.proxy.internal.metrics.MetricEmittingKafkaMessageListener;
+import io.kroxylicious.proxy.internal.net.BrokerEndpointBinding;
 import io.kroxylicious.proxy.internal.net.Endpoint;
 import io.kroxylicious.proxy.internal.net.EndpointBinding;
 import io.kroxylicious.proxy.internal.net.EndpointBindingResolver;
@@ -298,7 +299,7 @@ public class KafkaProxyInitializer extends ChannelInitializer<Channel> {
 
             HostPort target;
             Optional<SslContext> targetSslContext;
-            if (routingContext == null) {
+            if (routingContext == null || binding instanceof BrokerEndpointBinding) {
                 target = binding.upstreamTarget();
                 targetSslContext = binding.endpointGateway().virtualCluster().getUpstreamSslContext();
                 if (target == null) {
