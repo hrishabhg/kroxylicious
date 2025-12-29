@@ -39,6 +39,7 @@ import io.netty.channel.ChannelPipeline;
 import io.netty.handler.logging.LogLevel;
 import io.netty.handler.logging.LoggingHandler;
 import io.netty.handler.ssl.SniCompletionEvent;
+import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslHandler;
 import io.netty.handler.ssl.SslHandshakeCompletionEvent;
 
@@ -103,6 +104,8 @@ public class KafkaProxyFrontendHandler
 
     private @Nullable ClientSubjectManager clientSubjectManager;
     private int progressionLatch = -1;
+
+    private RoutingContext routingContext;
 
     static {
         var objectMapper = new ObjectMapper();
@@ -275,7 +278,9 @@ public class KafkaProxyFrontendHandler
         if (!this.endpointBinding.endpointGateway().isUseTls()) {
             this.clientSubjectManager.subjectFromTransport(null, this.subjectBuilder, this::onTransportSubjectBuilt);
         }
-        addFiltersToPipeline(netFilter.getFilterAndInvokerCollection(), clientCtx().pipeline(), clientCtx().channel());
+
+        routingContext = new RoutingContext(virtualClusterModel.targetCluster());
+        addFiltersToPipeline(netFilter.getFilterAndInvokerCollection(), clientCtx().pipeline(), clientCtx().channel(), routingContext);
     }
 
     private void onTransportSubjectBuilt() {
@@ -309,7 +314,7 @@ public class KafkaProxyFrontendHandler
         // Pass this as the filter context, so that
         // filter.initiateConnect() call's back on
         // our initiateConnect() method
-        this.netFilter.selectServer(this);
+        this.netFilter.selectServer(this, routingContext);
         this.proxyChannelStateMachine
                 .assertIsConnecting("NetFilter.selectServer() did not callback on NetFilterContext.initiateConnect(): filter='" + this.netFilter + "'");
     }
@@ -472,12 +477,17 @@ public class KafkaProxyFrontendHandler
     @Override
     public void initiateConnect(
                                 HostPort remote,
+                                Optional<SslContext> remoteSslContext,
                                 List<FilterAndInvoker> filters) {
         if (LOGGER.isDebugEnabled()) {
             LOGGER.debug("{}: Connecting to backend broker {} using filters {}",
                     this.proxyChannelStateMachine.sessionId(), remote, filters);
         }
-        this.proxyChannelStateMachine.onNetFilterInitiateConnect(remote, filters, virtualClusterModel, netFilter);
+        this.proxyChannelStateMachine.onNetFilterInitiateConnect(remote,
+                remoteSslContext,
+                filters,
+                virtualClusterModel,
+                netFilter);
     }
 
     /**
@@ -485,8 +495,10 @@ public class KafkaProxyFrontendHandler
      */
     void inConnecting(
                       HostPort remote,
+                      Optional<SslContext> remoteSslContext,
                       List<FilterAndInvoker> filters,
                       KafkaProxyBackendHandler backendHandler) {
+        routingContext.connected();
         final Channel inboundChannel = clientCtx().channel();
         // Start the upstream connection attempt.
         final Bootstrap bootstrap = configureBootstrap(backendHandler, inboundChannel);
@@ -516,7 +528,7 @@ public class KafkaProxyFrontendHandler
         if (logNetwork) {
             pipeline.addFirst("networkLogger", new LoggingHandler("io.kroxylicious.proxy.internal.UpstreamNetworkLogger", LogLevel.INFO));
         }
-        virtualClusterModel.getUpstreamSslContext().ifPresent(sslContext -> {
+        remoteSslContext.ifPresent(sslContext -> {
             final SslHandler handler = sslContext.newHandler(outboundChannel.alloc(), remote.host(), remote.port());
             pipeline.addFirst("ssl", handler);
         });
@@ -661,7 +673,8 @@ public class KafkaProxyFrontendHandler
     private void addFiltersToPipeline(
                                       List<FilterAndInvoker> filters,
                                       ChannelPipeline pipeline,
-                                      Channel inboundChannel) {
+                                      Channel inboundChannel,
+                                      RoutingContext routingContext) {
 
         int num = 0;
 
@@ -678,7 +691,8 @@ public class KafkaProxyFrontendHandler
                             virtualClusterModel,
                             inboundChannel,
                             proxyChannelStateMachine,
-                            clientSubjectManager));
+                            clientSubjectManager,
+                            routingContext));
         }
     }
 

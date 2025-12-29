@@ -7,6 +7,7 @@ package io.kroxylicious.proxy.internal;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -38,6 +39,7 @@ import io.kroxylicious.proxy.internal.filter.BrokerAddressFilter;
 import io.kroxylicious.proxy.internal.filter.EagerMetadataLearner;
 import io.kroxylicious.proxy.internal.filter.NettyFilterContext;
 import io.kroxylicious.proxy.internal.metrics.MetricEmittingKafkaMessageListener;
+import io.kroxylicious.proxy.internal.net.BrokerEndpointBinding;
 import io.kroxylicious.proxy.internal.net.Endpoint;
 import io.kroxylicious.proxy.internal.net.EndpointBinding;
 import io.kroxylicious.proxy.internal.net.EndpointBindingResolver;
@@ -49,6 +51,7 @@ import io.kroxylicious.proxy.service.HostPort;
 import io.kroxylicious.proxy.tag.VisibleForTesting;
 
 import edu.umd.cs.findbugs.annotations.NonNull;
+import edu.umd.cs.findbugs.annotations.Nullable;
 
 public class KafkaProxyInitializer extends ChannelInitializer<Channel> {
 
@@ -287,17 +290,27 @@ public class KafkaProxyInitializer extends ChannelInitializer<Channel> {
         }
 
         @Override
-        public void selectServer(NetFilter.NetFilterContext context) {
+        public void selectServer(NetFilter.NetFilterContext context, @Nullable RoutingContext routingContext) {
             LOGGER.info("{}: Selecting NetFilter.NetFilter context: {}", ch, context);
             // var filters = getFilterAndInvokerCollection();
 
-            HostPort target = binding.upstreamTarget();
-            if (target == null) {
-                // This condition should never happen.
-                throw new IllegalStateException("A target address for binding %s is not known.".formatted(binding));
+            HostPort target;
+            Optional<SslContext> targetSslContext;
+            if (routingContext == null || binding instanceof BrokerEndpointBinding) {
+                target = binding.upstreamTarget();
+                targetSslContext = binding.endpointGateway().virtualCluster().getUpstreamSslContext();
+                if (target == null) {
+                    // This condition should never happen.
+                    throw new IllegalStateException("A target address for binding %s is not known.".formatted(binding));
+                }
+            }
+            else {
+                target = routingContext.targetCluster().bootstrapServer();
+                targetSslContext = VirtualClusterModel.buildUpstreamSslContext(
+                        routingContext.targetCluster().tls());
             }
 
-            context.initiateConnect(target, cachedFilters);
+            context.initiateConnect(target, targetSslContext, cachedFilters);
         }
 
         @NonNull
