@@ -614,7 +614,6 @@ public class FilterHandler extends ChannelDuplexHandler {
         }
 
         @Override
-        @SuppressWarnings("removal")
         public <M extends ApiMessage> CompletionStage<M> sendRequest(RequestHeaderData header,
                                                                      ApiMessage request) {
             LOGGER.debug("{}: Filter '{}' using deprecated sendRequest - delegating to routingContext()",
