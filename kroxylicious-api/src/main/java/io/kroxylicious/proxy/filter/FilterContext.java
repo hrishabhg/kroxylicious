@@ -274,6 +274,7 @@ public interface FilterContext {
     void setTarget(String bootstrapServers, @Nullable Tls tlsConfig);
 
     boolean isTargetConnected();
+
     /**
      * @return The TLS configuration to use when connecting to the target backend Kafka cluster, if any.
      */

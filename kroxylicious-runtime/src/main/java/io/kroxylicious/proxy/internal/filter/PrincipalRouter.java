@@ -32,10 +32,9 @@ import io.kroxylicious.proxy.filter.SaslHandshakeRequestFilter;
 public class PrincipalRouter implements ApiVersionsRequestFilter, SaslHandshakeRequestFilter, SaslAuthenticateRequestFilter {
 
     private static final Map<String, TargetCluster> PrincipalRoutes = Map.of(
-            "alice", new TargetCluster("localhost:9092", Optional.empty()),
+            "alice", new TargetCluster("localhost:39092", Optional.empty()),
             "bob", new TargetCluster("localhost:62496", Optional.empty()),
-            "default", new TargetCluster("localhost:62496", Optional.empty())
-    );
+            "default", new TargetCluster("localhost:39092", Optional.empty()));
 
     @Override
     public CompletionStage<RequestFilterResult> onSaslAuthenticateRequest(short apiVersion, RequestHeaderData header, SaslAuthenticateRequestData request,

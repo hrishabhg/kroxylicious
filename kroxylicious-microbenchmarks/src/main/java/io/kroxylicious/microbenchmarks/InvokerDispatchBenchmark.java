@@ -227,6 +227,11 @@ public class InvokerDispatchBenchmark {
         }
 
         @Override
+        public boolean isTargetConnected() {
+            return false;
+        }
+
+        @Override
         public Optional<Tls> targetTlsConfig() {
             return Optional.empty();
         }
