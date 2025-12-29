@@ -295,7 +295,7 @@ public class KafkaProxyInitializer extends ChannelInitializer<Channel> {
 
             HostPort target;
             Optional<SslContext> targetSslContext;
-            if (routingContext == null) {
+            if (routingContext == null || binding instanceof BrokerEndpointBinding) {
                 target = binding.upstreamTarget();
                 targetSslContext = binding.endpointGateway().virtualCluster().getUpstreamSslContext();
                 if (target == null) {
