@@ -39,6 +39,7 @@ import io.kroxylicious.proxy.internal.filter.BrokerAddressFilter;
 import io.kroxylicious.proxy.internal.filter.EagerMetadataLearner;
 import io.kroxylicious.proxy.internal.filter.NettyFilterContext;
 import io.kroxylicious.proxy.internal.metrics.MetricEmittingKafkaMessageListener;
+import io.kroxylicious.proxy.internal.net.BrokerEndpointBinding;
 import io.kroxylicious.proxy.internal.net.Endpoint;
 import io.kroxylicious.proxy.internal.net.EndpointBinding;
 import io.kroxylicious.proxy.internal.net.EndpointBindingResolver;
