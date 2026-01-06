@@ -22,6 +22,7 @@ import io.kroxylicious.proxy.authentication.Subject;
 import io.kroxylicious.proxy.authentication.User;
 import io.kroxylicious.proxy.filter.metadata.TopicNameMapping;
 import io.kroxylicious.proxy.filter.metadata.TopicNameMappingException;
+import io.kroxylicious.proxy.net.RoutingContext;
 import io.kroxylicious.proxy.tls.ClientTlsContext;
 
 /**
@@ -117,6 +118,7 @@ public interface FilterContext {
      * @return CompletionStage that will yield the response.
      * @see io.kroxylicious.proxy.filter Thread Safety
      */
+    @Deprecated(since = "0.X")
     <M extends ApiMessage> CompletionStage<M> sendRequest(RequestHeaderData header,
                                                           ApiMessage request);
 
@@ -265,4 +267,34 @@ public interface FilterContext {
      */
     Subject authenticatedSubject();
 
+    /**
+     * Get the multi-cluster routing context for advanced routing scenarios.
+     *
+     * <p>This context provides access to:</p>
+     * <ul>
+     *   <li>Available cluster routes</li>
+     *   <li>Sending requests to specific clusters</li>
+     *   <li>Fan-out requests to multiple clusters</li>
+     *   <li>NodeId offset utilities for metadata merging</li>
+     * </ul>
+     *
+     * <p>For single-cluster deployments, this returns a context with exactly one
+     * cluster route accessible via {@link RoutingContext#primaryCluster()} ()}.</p>
+     *
+     * <h4>Example: Conditional Multi-Cluster Handling</h4>
+     * <pre>{@code
+     * MultiClusterRoutingContext routing = context.routingContext();
+     * if (routing.isMultiCluster()) {
+     *     // Fan out metadata to all clusters
+     *     return routing.fanOutRequestToAll(header, request)
+     *         .thenApply(this::mergeResponses);
+     * } else {
+     *     // Single cluster - forward normally
+     *     return context.forwardRequest(header, request);
+     * }
+     * }</pre>
+     *
+     * @return the multi-cluster routing context
+     */
+    RoutingContext routingContext();
 }

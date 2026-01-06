@@ -37,8 +37,11 @@ public class KafkaProxyBackendHandler extends ChannelInboundHandlerAdapter {
     private boolean pendingServerFlushes;
 
     public KafkaProxyBackendHandler(ProxyChannelStateMachine proxyChannelStateMachine, VirtualClusterModel virtualClusterModel) {
+        this(proxyChannelStateMachine, virtualClusterModel.getUpstreamSslContext());
+    }
+
+    public KafkaProxyBackendHandler(ProxyChannelStateMachine proxyChannelStateMachine, Optional<SslContext> upstreamSslContext) {
         this.proxyChannelStateMachine = Objects.requireNonNull(proxyChannelStateMachine);
-        Optional<SslContext> upstreamSslContext = virtualClusterModel.getUpstreamSslContext();
         this.sslContext = upstreamSslContext.orElse(null);
     }
 
