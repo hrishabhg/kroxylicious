@@ -155,7 +155,7 @@ public class FilterHandler extends ChannelDuplexHandler {
                 });
             }
             else {
-                throw new IllegalStateException("Filter '" + filterAndInvoker.filterName() + "': Unexpected message reading from upstream: " + msgDescriptor(msg));
+                throw new IllegalStateException("Filter '" + filterAndInvoker.filterName() + "': Unexpected message writing to downstream: " + msgDescriptor(msg));
             }
         }
     }
@@ -331,6 +331,7 @@ public class FilterHandler extends ChannelDuplexHandler {
         if (requestFilterResult.message() != null) {
             if (requestFilterResult.shortCircuitResponse()) {
                 forwardShortCircuitResponse(decodedFrame, requestFilterResult);
+                inboundChannel.read();
             }
             else {
                 forwardRequest(decodedFrame, requestFilterResult);
@@ -509,6 +510,11 @@ public class FilterHandler extends ChannelDuplexHandler {
                 throw new IllegalStateException("Cannot set target when already connected");
             }
             routingContext.setTargetCluster(new TargetCluster(bootstrapServers, tlsConfig == null ? Optional.empty() : Optional.of(tlsConfig)));
+        }
+
+        @Override
+        public boolean isTargetConnected() {
+            return routingContext.isConnected();
         }
 
         @Override

@@ -7,6 +7,7 @@ package io.kroxylicious.proxy.internal;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 
 import org.slf4j.Logger;
@@ -36,8 +37,10 @@ import io.kroxylicious.proxy.internal.codec.KafkaResponseEncoder;
 import io.kroxylicious.proxy.internal.filter.ApiVersionsDowngradeFilter;
 import io.kroxylicious.proxy.internal.filter.ApiVersionsIntersectFilter;
 import io.kroxylicious.proxy.internal.filter.BrokerAddressFilter;
+import io.kroxylicious.proxy.internal.filter.ClientRouter;
 import io.kroxylicious.proxy.internal.filter.EagerMetadataLearner;
 import io.kroxylicious.proxy.internal.filter.NettyFilterContext;
+import io.kroxylicious.proxy.internal.filter.PrincipalRouter;
 import io.kroxylicious.proxy.internal.metrics.MetricEmittingKafkaMessageListener;
 import io.kroxylicious.proxy.internal.net.BrokerEndpointBinding;
 import io.kroxylicious.proxy.internal.net.Endpoint;
@@ -319,15 +322,24 @@ public class KafkaProxyInitializer extends ChannelInitializer<Channel> {
 
             NettyFilterContext filterContext = new NettyFilterContext(ch.eventLoop(), pfr);
             List<FilterAndInvoker> filterChain = filterChainFactory.createFilters(filterContext, filterDefinitions);
+            List<FilterAndInvoker> router = null;
+            if (Objects.equals(System.getenv("POC"), "CLIENT_ROUTING")) {
+                router = FilterAndInvoker.build("ClientRouter (internal)", new ClientRouter());
+            }
+            else if (Objects.equals(System.getenv("POC"), "PRINCIPAL_ROUTING")) {
+                router = FilterAndInvoker.build("PrincipalRouter (internal)", new PrincipalRouter());
+            }
             List<FilterAndInvoker> brokerAddressFilters = FilterAndInvoker.build("BrokerAddress (internal)", new BrokerAddressFilter(gateway, endpointReconciler));
-            // List<FilterAndInvoker> shortCircuitFilters = FilterAndInvoker.build("ShortCircuit (internal)", new ShortCircuitFilter());
-            var filters = new ArrayList<>(apiVersionFilters);
+            ArrayList<FilterAndInvoker> filters = new ArrayList<>();
+            if (router != null) {
+                filters.addAll(router);
+            }
+            filters.addAll(apiVersionFilters);
             filters.addAll(FilterAndInvoker.build("ApiVersionsDowngrade (internal)", apiVersionsDowngradeFilter));
             filters.addAll(filterChain);
             if (binding.restrictUpstreamToMetadataDiscovery()) {
                 filters.addAll(FilterAndInvoker.build("EagerMetadataLearner (internal)", new EagerMetadataLearner()));
             }
-            // filters.addAll(shortCircuitFilters);
             filters.addAll(brokerAddressFilters);
             cachedFilters = filters;
             return filters;

@@ -172,6 +172,11 @@ public record MockFilterContext(ApiMessage header, ApiMessage message, Subject s
     }
 
     @Override
+    public boolean isTargetConnected() {
+        return false;
+    }
+
+    @Override
     public Optional<Tls> targetTlsConfig() {
         return Optional.empty();
     }
