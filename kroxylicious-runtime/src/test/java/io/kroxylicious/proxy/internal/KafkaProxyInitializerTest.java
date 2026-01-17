@@ -253,7 +253,7 @@ class KafkaProxyInitializerTest {
         final NetFilter.NetFilterContext netFilterContext = mock(NetFilter.NetFilterContext.class);
 
         // When
-        initalizerNetFilter.selectServer(netFilterContext);
+        initalizerNetFilter.selectServer(netFilterContext, null);
 
         // Then
         verify(fcf).createFilters(any(FilterFactoryContext.class), any(List.class));

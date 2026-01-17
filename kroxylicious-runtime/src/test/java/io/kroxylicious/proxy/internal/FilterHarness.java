@@ -37,7 +37,11 @@ import io.kroxylicious.proxy.frame.DecodedRequestFrame;
 import io.kroxylicious.proxy.frame.DecodedResponseFrame;
 import io.kroxylicious.proxy.frame.OpaqueRequestFrame;
 import io.kroxylicious.proxy.frame.OpaqueResponseFrame;
+import io.kroxylicious.proxy.internal.net.RoutingContextImpl;
+import io.kroxylicious.proxy.internal.session.ClientSessionStateMachine;
+import io.kroxylicious.proxy.internal.session.ClusterConnectionManager;
 import io.kroxylicious.proxy.model.VirtualClusterModel;
+import io.kroxylicious.proxy.net.RoutingContext;
 import io.kroxylicious.proxy.service.HostPort;
 import io.kroxylicious.proxy.service.NodeIdentificationStrategy;
 
@@ -86,9 +90,18 @@ public abstract class FilterHarness {
         var inboundChannel = new EmbeddedChannel();
         var channelProcessors = Stream.<ChannelHandler> of(new InternalRequestTracker(), new CorrelationIdIssuer());
 
-        ProxyChannelStateMachine channelStateMachine = new ProxyChannelStateMachine(testVirtualCluster.getClusterName(), null);
+        ClientSessionStateMachine channelStateMachine = new ClientSessionStateMachine(testVirtualCluster.getClusterName(), null);
+        ClusterConnectionManager clusterConnectionManager = new ClusterConnectionManager(
+                channelStateMachine.sessionId(),
+                testVirtualCluster.getClusterName(),
+                channelStateMachine,
+                testVirtualCluster.socketFrameMaxSizeBytes(),
+                false,
+                false
+        );
 
         clientSubjectManager = new ClientSubjectManager();
+        RoutingContext routingContext = new RoutingContextImpl(clusterConnectionManager);
         var filterHandlers = Arrays.stream(filters)
                 .collect(Collector.of(ArrayDeque<Filter>::new, ArrayDeque::addFirst, (d1, d2) -> {
                     d2.addAll(d1);
@@ -97,13 +110,12 @@ public abstract class FilterHarness {
                 .stream()
                 .map(f -> new FilterHandler(getOnlyElement(FilterAndInvoker.build(f.getClass().getSimpleName(), f)), timeoutMs, null, testVirtualCluster, inboundChannel,
                         channelStateMachine,
-                        clientSubjectManager))
+                        clientSubjectManager, null))
 
                 .map(ChannelHandler.class::cast);
         var handlers = Stream.concat(channelProcessors, filterHandlers);
 
         channel = new EmbeddedChannel(handlers.toArray(ChannelHandler[]::new));
-        channelStateMachine.allocateSessionId();
     }
 
     /**

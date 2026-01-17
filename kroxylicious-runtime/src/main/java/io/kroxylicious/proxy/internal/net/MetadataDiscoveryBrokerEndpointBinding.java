@@ -6,9 +6,13 @@
 
 package io.kroxylicious.proxy.internal.net;
 
+import java.util.List;
 import java.util.Objects;
 
-import io.kroxylicious.proxy.service.HostPort;
+import org.apache.kafka.common.protocol.ApiKeys;
+
+import io.kroxylicious.proxy.filter.FilterContext;
+import io.kroxylicious.proxy.service.ServiceEndpoint;
 
 /**
  * A bootstrap binding which can only be used for metadata discovery.
@@ -27,13 +31,18 @@ public record MetadataDiscoveryBrokerEndpointBinding(EndpointGateway endpointGat
     }
 
     @Override
-    public HostPort upstreamTarget() {
-        return endpointGateway.targetCluster().bootstrapServer();
+    public Integer nodeId() {
+        return nodeId;
     }
 
     @Override
-    public Integer nodeId() {
-        return nodeId;
+    public List<ServiceEndpoint> upstreamServiceEndpoints(ApiKeys apiKey) {
+        return allUpstreamServiceEndpoints();
+    }
+
+    @Override
+    public List<ServiceEndpoint> allUpstreamServiceEndpoints() {
+        return endpointGateway.targetClusters().stream().map(t -> new ServiceEndpoint(t.bootstrapServer().host(), t.bootstrapServer().port(), t)).toList();
     }
 
     @Override

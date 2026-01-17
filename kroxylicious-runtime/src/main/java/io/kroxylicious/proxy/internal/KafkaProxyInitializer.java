@@ -8,6 +8,7 @@ package io.kroxylicious.proxy.internal;
 import java.util.ArrayList;
 import java.util.List;
 
+import org.apache.kafka.common.protocol.ApiKeys;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -28,6 +29,7 @@ import io.kroxylicious.proxy.bootstrap.FilterChainFactory;
 import io.kroxylicious.proxy.config.NamedFilterDefinition;
 import io.kroxylicious.proxy.config.PluginFactoryRegistry;
 import io.kroxylicious.proxy.filter.FilterAndInvoker;
+import io.kroxylicious.proxy.filter.FilterContext;
 import io.kroxylicious.proxy.filter.NetFilter;
 import io.kroxylicious.proxy.internal.codec.KafkaMessageListener;
 import io.kroxylicious.proxy.internal.codec.KafkaRequestDecoder;
@@ -43,9 +45,9 @@ import io.kroxylicious.proxy.internal.net.EndpointBinding;
 import io.kroxylicious.proxy.internal.net.EndpointBindingResolver;
 import io.kroxylicious.proxy.internal.net.EndpointGateway;
 import io.kroxylicious.proxy.internal.net.EndpointReconciler;
+import io.kroxylicious.proxy.internal.session.ClientSessionStateMachine;
 import io.kroxylicious.proxy.internal.util.Metrics;
 import io.kroxylicious.proxy.model.VirtualClusterModel;
-import io.kroxylicious.proxy.service.HostPort;
 import io.kroxylicious.proxy.tag.VisibleForTesting;
 
 import edu.umd.cs.findbugs.annotations.NonNull;
@@ -222,8 +224,8 @@ public class KafkaProxyInitializer extends ChannelInitializer<Channel> {
                 new ApiVersionsIntersectFilter(apiVersionsService),
                 new ApiVersionsDowngradeFilter(apiVersionsService));
 
-        ProxyChannelStateMachine proxyChannelStateMachine = new ProxyChannelStateMachine(virtualCluster.getClusterName(), binding.nodeId());
-        var frontendHandler = new KafkaProxyFrontendHandler(netFilter, dp, virtualCluster.subjectBuilder(pfr), binding, proxyChannelStateMachine);
+        ClientSessionStateMachine clientChannelStateMachine = new ClientSessionStateMachine(virtualCluster.getClusterName(), binding);
+        var frontendHandler = new KafkaProxyFrontendHandler(netFilter, dp, virtualCluster.subjectBuilder(pfr), binding, clientChannelStateMachine);
 
         pipeline.addLast("netHandler", frontendHandler);
         addLoggingErrorHandler(pipeline);
@@ -287,17 +289,10 @@ public class KafkaProxyInitializer extends ChannelInitializer<Channel> {
         }
 
         @Override
-        public void selectServer(NetFilter.NetFilterContext context) {
+        public void selectServer(NetFilter.NetFilterContext context, ApiKeys apiKey, FilterContext filterContext) {
             LOGGER.info("{}: Selecting NetFilter.NetFilter context: {}", ch, context);
-            // var filters = getFilterAndInvokerCollection();
-
-            HostPort target = binding.upstreamTarget();
-            if (target == null) {
-                // This condition should never happen.
-                throw new IllegalStateException("A target address for binding %s is not known.".formatted(binding));
-            }
-
-            context.initiateConnect(target, cachedFilters);
+            cachedFilters = getFilterAndInvokerCollection();
+            context.initiateConnect(binding.upstreamServiceEndpoints(apiKey), cachedFilters);
         }
 
         @NonNull

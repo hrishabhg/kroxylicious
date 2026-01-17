@@ -6,9 +6,13 @@
 
 package io.kroxylicious.proxy.internal.net;
 
+import java.util.List;
 import java.util.Objects;
 
-import io.kroxylicious.proxy.service.HostPort;
+import org.apache.kafka.common.protocol.ApiKeys;
+
+import io.kroxylicious.proxy.filter.FilterContext;
+import io.kroxylicious.proxy.service.ServiceEndpoint;
 
 import edu.umd.cs.findbugs.annotations.Nullable;
 
@@ -24,8 +28,13 @@ public record BootstrapEndpointBinding(EndpointGateway endpointGateway) implemen
     }
 
     @Override
-    public HostPort upstreamTarget() {
-        return endpointGateway().targetCluster().bootstrapServer();
+    public List<ServiceEndpoint> upstreamServiceEndpoints(ApiKeys apiKey) {
+        return allUpstreamServiceEndpoints();
+    }
+
+    @Override
+    public List<ServiceEndpoint> allUpstreamServiceEndpoints() {
+        return endpointGateway.targetClusters().stream().map(t -> new ServiceEndpoint(t.bootstrapServer().host(), t.bootstrapServer().port(), t)).toList();
     }
 
     @Nullable
