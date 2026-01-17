@@ -7,8 +7,8 @@ package io.kroxylicious.proxy.internal;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Optional;
 
+import org.apache.kafka.common.protocol.ApiKeys;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -29,6 +29,7 @@ import io.kroxylicious.proxy.bootstrap.FilterChainFactory;
 import io.kroxylicious.proxy.config.NamedFilterDefinition;
 import io.kroxylicious.proxy.config.PluginFactoryRegistry;
 import io.kroxylicious.proxy.filter.FilterAndInvoker;
+import io.kroxylicious.proxy.filter.FilterContext;
 import io.kroxylicious.proxy.filter.NetFilter;
 import io.kroxylicious.proxy.internal.codec.KafkaMessageListener;
 import io.kroxylicious.proxy.internal.codec.KafkaRequestDecoder;
@@ -39,7 +40,6 @@ import io.kroxylicious.proxy.internal.filter.BrokerAddressFilter;
 import io.kroxylicious.proxy.internal.filter.EagerMetadataLearner;
 import io.kroxylicious.proxy.internal.filter.NettyFilterContext;
 import io.kroxylicious.proxy.internal.metrics.MetricEmittingKafkaMessageListener;
-import io.kroxylicious.proxy.internal.net.BrokerEndpointBinding;
 import io.kroxylicious.proxy.internal.net.Endpoint;
 import io.kroxylicious.proxy.internal.net.EndpointBinding;
 import io.kroxylicious.proxy.internal.net.EndpointBindingResolver;
@@ -48,12 +48,9 @@ import io.kroxylicious.proxy.internal.net.EndpointReconciler;
 import io.kroxylicious.proxy.internal.session.ClientSessionStateMachine;
 import io.kroxylicious.proxy.internal.util.Metrics;
 import io.kroxylicious.proxy.model.VirtualClusterModel;
-import io.kroxylicious.proxy.net.RoutingContext;
-import io.kroxylicious.proxy.service.HostPort;
 import io.kroxylicious.proxy.tag.VisibleForTesting;
 
 import edu.umd.cs.findbugs.annotations.NonNull;
-import edu.umd.cs.findbugs.annotations.Nullable;
 
 public class KafkaProxyInitializer extends ChannelInitializer<Channel> {
 
@@ -227,7 +224,7 @@ public class KafkaProxyInitializer extends ChannelInitializer<Channel> {
                 new ApiVersionsIntersectFilter(apiVersionsService),
                 new ApiVersionsDowngradeFilter(apiVersionsService));
 
-        ClientSessionStateMachine clientChannelStateMachine = new ClientSessionStateMachine(virtualCluster.getClusterName(), binding.nodeId());
+        ClientSessionStateMachine clientChannelStateMachine = new ClientSessionStateMachine(virtualCluster.getClusterName(), binding);
         var frontendHandler = new KafkaProxyFrontendHandler(netFilter, dp, virtualCluster.subjectBuilder(pfr), binding, clientChannelStateMachine);
 
         pipeline.addLast("netHandler", frontendHandler);
@@ -292,28 +289,10 @@ public class KafkaProxyInitializer extends ChannelInitializer<Channel> {
         }
 
         @Override
-        public void selectServer(NetFilter.NetFilterContext context, @Nullable RoutingContext routingContext) {
+        public void selectServer(NetFilter.NetFilterContext context, ApiKeys apiKey, FilterContext filterContext) {
             LOGGER.info("{}: Selecting NetFilter.NetFilter context: {}", ch, context);
-            // var filters = getFilterAndInvokerCollection();
-
-            HostPort target;
-            Optional<SslContext> targetSslContext;
-            if (routingContext == null || binding instanceof BrokerEndpointBinding) {
-                target = binding.upstreamTarget();
-                targetSslContext = binding.endpointGateway().virtualCluster().getUpstreamSslContext();
-                if (target == null) {
-                    // This condition should never happen.
-                    throw new IllegalStateException("A target address for binding %s is not known.".formatted(binding));
-                }
-            }
-            else {
-                // todo: leverage target cluster bootstrap server selection strategy
-                target = HostPort.parse(routingContext.primaryCluster().bootstrapServers());
-                targetSslContext = VirtualClusterModel.buildUpstreamSslContext(
-                        routingContext.primaryCluster().tls());
-            }
-
-            context.initiateConnect(target, targetSslContext, cachedFilters);
+            cachedFilters = getFilterAndInvokerCollection();
+            context.initiateConnect(binding.upstreamServiceEndpoints(apiKey), cachedFilters);
         }
 
         @NonNull

@@ -9,6 +9,8 @@ import java.net.SocketAddress;
 import java.util.List;
 import java.util.Optional;
 
+import org.apache.kafka.common.protocol.ApiKeys;
+
 import io.netty.handler.ssl.SslContext;
 
 import io.kroxylicious.proxy.net.RoutingContext;
@@ -29,7 +31,7 @@ public interface NetFilter {
      * by invoking {@link NetFilterContext#initiateConnect(List, List)}.
      * @param context The context.
      */
-    void selectServer(NetFilterContext context, FilterContext filterContext);
+    void selectServer(NetFilterContext context, ApiKeys apiKey, FilterContext filterContext);
 
     default List<FilterAndInvoker> getFilterAndInvokerCollection() {
         return List.of();

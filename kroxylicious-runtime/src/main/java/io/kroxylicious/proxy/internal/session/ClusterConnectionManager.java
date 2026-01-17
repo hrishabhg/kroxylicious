@@ -87,7 +87,7 @@ public class ClusterConnectionManager {
     private final Map<String, ServiceEndpoint> serviceEndpoints = new ConcurrentHashMap<>();
 
     // Correlation counter for aggregating responses
-    private final Map<Integer, AggregationContext> aggregationCorrelationManager = new ConcurrentHashMap<>();
+    private final Map<Integer, AggregationContext<?>> aggregationCorrelationManager = new ConcurrentHashMap<>();
 
     private volatile ServiceEndpoint defaultTarget;
     private EndpointBinding endpointBinding;
@@ -268,7 +268,7 @@ public class ClusterConnectionManager {
         if (msg instanceof Frame frame) {
             msgTargets = endpointBinding.upstreamServiceEndpoints(ApiKeys.forId(frame.apiKeyId()));
             if (!aggregationCorrelationManager.containsKey(frame.correlationId())) {
-                aggregationCorrelationManager.put(frame.correlationId(), new AggregationContext(msgTargets.size()));
+                aggregationCorrelationManager.put(frame.correlationId(), new AggregationContext<>(msgTargets.size()));
             }
         }
         else {
