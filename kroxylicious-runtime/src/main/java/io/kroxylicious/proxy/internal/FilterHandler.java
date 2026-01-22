@@ -15,6 +15,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.apache.kafka.common.Uuid;
+import org.apache.kafka.common.message.ProduceRequestData;
 import org.apache.kafka.common.message.RequestHeaderData;
 import org.apache.kafka.common.message.ResponseHeaderData;
 import org.apache.kafka.common.protocol.ApiKeys;
@@ -116,13 +117,14 @@ public class FilterHandler extends ChannelDuplexHandler {
     @Override
     public void handlerAdded(ChannelHandlerContext ctx) throws Exception {
         this.ctx = ctx;
-        this.promiseFactory = new PromiseFactory(ctx.executor(), timeoutMs, TimeUnit.MILLISECONDS, LOGGER.getName());
+        this.promiseFactory = new PromiseFactory(ctx.channel().eventLoop(), timeoutMs, TimeUnit.MILLISECONDS, LOGGER.getName());
         super.handlerAdded(ctx);
     }
 
     @Override
     public void write(ChannelHandlerContext ctx, Object msg, ChannelPromise promise) throws Exception {
         if (msg instanceof InternalResponseFrame<?> decodedFrame) {
+            // jump the queue, let responses to asynchronous requests flow back to their sender
             if (decodedFrame.isRecipient(filterAndInvoker.filter())) {
                 completeInternalResponse(decodedFrame);
             }
@@ -246,8 +248,7 @@ public class FilterHandler extends ChannelDuplexHandler {
         }
         var stage = filterAndInvoker.invoker().onResponse(decodedFrame.apiKey(), decodedFrame.apiVersion(),
                 decodedFrame.header(), decodedFrame.body(), filterContext);
-        return stage instanceof InternalCompletionStage ? ((InternalCompletionStage<ResponseFilterResult>) stage).getUnderlyingCompletableFuture()
-                : stage.toCompletableFuture();
+        return stage.toCompletableFuture();
     }
 
     private CompletableFuture<ResponseFilterResult> configureResponseFilterChain(DecodedResponseFrame<?> decodedFrame,
@@ -286,8 +287,7 @@ public class FilterHandler extends ChannelDuplexHandler {
         }
         var stage = filterAndInvoker.invoker().onRequest(decodedFrame.apiKey(), decodedFrame.apiVersion(), decodedFrame.header(),
                 decodedFrame.body(), filterContext);
-        return stage instanceof InternalCompletionStage ? ((InternalCompletionStage<RequestFilterResult>) stage).getUnderlyingCompletableFuture()
-                : stage.toCompletableFuture();
+        return stage.toCompletableFuture();
     }
 
     private CompletableFuture<RequestFilterResult> configureRequestFilterChain(DecodedRequestFrame<?> decodedFrame,
@@ -315,6 +315,9 @@ public class FilterHandler extends ChannelDuplexHandler {
         }
 
         if (responseFilterResult.closeConnection()) {
+            if (responseFilterResult.message() != null) {
+                ctx.flush(); // ensure writes are flushed before closing
+            }
             closeConnection();
         }
         return responseFilterResult;
@@ -327,6 +330,8 @@ public class FilterHandler extends ChannelDuplexHandler {
                 LOGGER.debug("{}: Filter '{}' drops {} request",
                         channelDescriptor(), filterDescriptor(), decodedFrame.apiKey());
             }
+            // When a request is dropped, trigger reading the next request to keep the channel active
+            inboundChannel.read();
             return requestFilterResult;
         }
 
@@ -375,17 +380,23 @@ public class FilterHandler extends ChannelDuplexHandler {
 
     private void deferredResponseCompleted(ResponseFilterResult ignored, Throwable throwable) {
         inboundChannel.config().setAutoRead(true);
-        readFuture.whenComplete((u, t) -> inboundChannel.flush());
+        // Ensure proper ordering of flushes to prevent race conditions
+        writeFuture.whenComplete((u, t) -> {
+            ctx.flush();
+            readFuture.whenComplete((u2, t2) -> inboundChannel.flush());
+        });
     }
 
     private void deferredRequestCompleted(RequestFilterResult ignored, Throwable throwable) {
         inboundChannel.config().setAutoRead(true);
-        // flush so that writes from this completion can be driven towards the broker
+        // Ensure proper ordering of flushes to prevent race conditions
+        // First flush any immediate writes, then chain additional flushes
         ctx.flush();
-        // chain a flush to force any pending writes towards the broker
-        writeFuture.whenComplete((u, t) -> ctx.flush());
-        // flush inbound in case of short-circuit
-        inboundChannel.flush();
+        writeFuture.whenComplete((u, t) -> {
+            ctx.flush();
+            // flush inbound in case of short-circuit, but only after context flush is done
+            inboundChannel.flush();
+        });
     }
 
     private void forwardRequest(DecodedRequestFrame<?> decodedFrame,
@@ -409,6 +420,7 @@ public class FilterHandler extends ChannelDuplexHandler {
         }
 
         ctx.fireChannelRead(decodedFrame);
+        ctx.fireChannelReadComplete();
     }
 
     private void forwardResponse(DecodedFrame<?, ?> decodedFrame, ResponseHeaderData header, ApiMessage message, @Nullable ChannelPromise promise) {
@@ -619,54 +631,35 @@ public class FilterHandler extends ChannelDuplexHandler {
             return responseFilterResultBuilder().forward(header, response).completed();
         }
 
+        // endpointBinding.upstreamServiceEndpoints(ApiKeys.forId(request.apiKey())).sendRequest(header, request);
         @Override
         public <M extends ApiMessage> CompletionStage<M> sendRequest(RequestHeaderData header,
                                                                      ApiMessage request) {
-            LOGGER.debug("{}: Filter '{}' using deprecated sendRequest - delegating to routingContext()",
-                    FilterHandler.this.channelDescriptor(), filterDescriptor());
-            return endpointBinding.upstreamServiceEndpoints(ApiKeys.forId(request.apiKey())).sendRequest(header, request);
-            // Objects.requireNonNull(header);
-            // Objects.requireNonNull(request);
-            //
-            // var apiKey = ApiKeys.forId(request.apiKey());
-            // header.setRequestApiKey(apiKey.id);
-            // header.setCorrelationId(-1);
-            //
-            // if (!apiKey.isVersionSupported(header.requestApiVersion())) {
-            // throw new IllegalArgumentException(
-            // "Filter '%s': apiKey %s does not support version %d. the supported version range for this api key is %d...%d (inclusive)."
-            // .formatted(filterDescriptor(), apiKey, header.requestApiVersion(), apiKey.oldestVersion(), apiKey.latestVersion()));
-            // }
-            //
-            // var hasResponse = apiKey != ApiKeys.PRODUCE || ((ProduceRequestData) request).acks() != 0;
-            // CompletableFuture<M> filterPromise = promiseFactory.newTimeLimitedPromise(
-            // () -> "Asynchronous %s request made by filter '%s' failed to complete within %s ms.".formatted(apiKey, filterDescriptor(), timeoutMs));
-            // var frame = new InternalRequestFrame<>(
-            // header.requestApiVersion(), header.correlationId(), hasResponse,
-            // filterAndInvoker.filter(), filterPromise, header, request);
-            //
-            // if (LOGGER.isDebugEnabled()) {
-            // LOGGER.debug("{}: Filter '{}' sending request: {}", FilterHandler.this.channelDescriptor(), filterDescriptor(), msgDescriptor(frame));
-            // }
-            // ChannelPromise writePromise = ctx.channel().newPromise();
-            // ctx.writeAndFlush(frame, writePromise);
-            //
-            // if (!hasResponse) {
-            // // Complete the filter promise for an ack-less Produce
-            // // based on the success of the channel write
-            // // (for all other requests the filter promise will be completed
-            // // when handling the response).
-            // writePromise.addListener(f -> {
-            // if (f.isSuccess()) {
-            // filterPromise.complete(null);
-            // }
-            // else {
-            // filterPromise.completeExceptionally(f.cause());
-            // }
-            // });
-            // }
-            //
-            // return filterPromise.minimalCompletionStage();
+            Objects.requireNonNull(header);
+            Objects.requireNonNull(request);
+
+            var apiKey = ApiKeys.forId(request.apiKey());
+            header.setRequestApiKey(apiKey.id);
+            header.setCorrelationId(-1);
+
+            if (!apiKey.isVersionSupported(header.requestApiVersion())) {
+                throw new IllegalArgumentException(
+                        "Filter '%s': apiKey %s does not support version %d. the supported version range for this api key is %d...%d (inclusive)."
+                                .formatted(filterDescriptor(), apiKey, header.requestApiVersion(), apiKey.oldestVersion(), apiKey.latestVersion()));
+            }
+
+            var hasResponse = apiKey != ApiKeys.PRODUCE || ((ProduceRequestData) request).acks() != 0;
+            CompletableFuture<M> filterPromise = promiseFactory.newTimeLimitedPromise(
+                    () -> "Asynchronous %s request made by filter '%s' failed to complete within %s ms.".formatted(apiKey, filterDescriptor(), timeoutMs));
+            var frame = new InternalRequestFrame<>(
+                    header.requestApiVersion(), header.correlationId(), hasResponse,
+                    filterAndInvoker.filter(), filterPromise, header, request);
+
+            if (LOGGER.isDebugEnabled()) {
+                LOGGER.debug("{}: Filter '{}' sending request: {}", FilterHandler.this.channelDescriptor(), filterDescriptor(), msgDescriptor(frame));
+            }
+            Objects.requireNonNull(ctx).fireChannelRead(frame);
+            return filterPromise.minimalCompletionStage();
         }
 
         @Override

@@ -7,7 +7,6 @@
 package io.kroxylicious.proxy.internal.filter;
 
 import java.io.IOException;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -90,11 +89,11 @@ class BrokerAddressFilterTest {
 
     private FilterInvoker invoker;
 
-    public static Stream<Arguments> nodeInfoCarryingResponses() throws Exception {
+    static Stream<Arguments> nodeInfoCarryingResponses() throws Exception {
         return responses(td -> td.response() != null);
     }
 
-    public static Stream<Arguments> completeClusterInfoCarryingResponses() throws Exception {
+    static Stream<Arguments> completeClusterInfoCarryingResponses() throws Exception {
         return responses(td -> td.response() != null && Set.of(ApiMessageType.METADATA, ApiMessageType.DESCRIBE_CLUSTER).contains(td.apiKey()));
     }
 
@@ -104,8 +103,8 @@ class BrokerAddressFilterTest {
     }
 
     @BeforeEach
-    public void beforeEach() {
-        filter = new BrokerAddressFilter(virtualClusterListenerModel, endpointReconciler, new HashMap<String, Integer>());
+    void beforeEach() {
+        filter = new BrokerAddressFilter(virtualClusterListenerModel, endpointReconciler);
         invoker = getOnlyElement(FilterAndInvoker.build(((Filter) filter).getClass().getSimpleName(), filter)).invoker();
         lenient().when(virtualClusterListenerModel.getBrokerAddress(0)).thenReturn(HostPort.parse("downstream:19199"));
         lenient().when(virtualClusterListenerModel.getAdvertisedBrokerAddress(0)).thenReturn(HostPort.parse("downstream:19200"));
@@ -154,6 +153,6 @@ class BrokerAddressFilterTest {
     private void configureContextResponseStubbing() {
         lenient().when(context.responseFilterResultBuilder()).thenReturn(new ResponseFilterResultBuilderImpl());
         lenient().when(context.forwardResponse(responseHeaderDataCaptor.capture(), apiMessageCaptor.capture()))
-                .thenAnswer((x) -> new ResponseFilterResultBuilderImpl().forward(responseHeaderDataCaptor.getValue(), apiMessageCaptor.getValue()).completed());
+                .thenAnswer(x -> new ResponseFilterResultBuilderImpl().forward(responseHeaderDataCaptor.getValue(), apiMessageCaptor.getValue()).completed());
     }
 }

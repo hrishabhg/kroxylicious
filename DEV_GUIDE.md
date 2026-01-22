@@ -265,7 +265,7 @@ as a suggestion if you used sdkman to install it).
 
 In the IDEA Maven dialogue click on `Generate Sources and Update Folders For All Projects`.
 
-Build the entire project by running `Build > Build Project` and then check that you can run `io.kroxylicious.proxy.FilterIT`
+Build the entire project by running `Build > Build Project` and then check that you can run `io.kroxylicious.it.FilterIT`
 
 If you encounter any further issues with generated sources, you can try running `mvn clean install -DskipTests` again or running 
 `Generate Sources and Update Folders` for the specific module that is having problems.
@@ -438,7 +438,7 @@ the container engine. Default value: `$HOME/.docker/config.json`
 * `AWS_SECRET_ACCESS_KEY`: secret access key of the aws account with admin permissions to be used for KMS management. Mandatory when `AWS_USE_CLOUD` is `true`. Default value: `test`
 * `AWS_KROXYLICIOUS_ACCESS_KEY_ID`: key id of the aws account to be used for Kroxylicious config Map to encrypt/decrypt the messages. Mandatory when `AWS_USE_CLOUD` is `true`. Default value: `test`
 * `AWS_KROXYLICIOUS_SECRET_ACCESS_KEY`: secret access key of the aws account to be used for Kroxylicious config Map to encrypt/decrypt the messages. Mandatory when `AWS_USE_CLOUD` is `true`. Default value: `test`
-* `CURL_IMAGE`: curl image to be used in the corresponding arch for metrics tests. Default value: `mirror.gcr.io/curlimages/curl:8.17.0`
+* `CURL_IMAGE`: curl image to be used in the corresponding arch for metrics tests. Default value: `mirror.gcr.io/curlimages/curl:8.18.0`
 
 ### Launch system tests
 First of all, the code must be compiled and the distribution artifacts created:

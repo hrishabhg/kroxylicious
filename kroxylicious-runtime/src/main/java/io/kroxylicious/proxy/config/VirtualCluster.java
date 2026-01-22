@@ -34,7 +34,8 @@ public record VirtualCluster(@JsonProperty(required = true) String name,
                              boolean logNetwork,
                              boolean logFrames,
                              @Nullable List<String> filters,
-                             @Nullable TransportSubjectBuilderConfig subjectBuilder) {
+                             @Nullable TransportSubjectBuilderConfig subjectBuilder,
+                             @Nullable CacheConfiguration topicNameCache) {
 
     private static final Pattern DNS_LABEL_PATTERN = Pattern.compile("^[a-z0-9]([-a-z0-9]*[a-z0-9])?$", Pattern.CASE_INSENSITIVE);
 
@@ -71,7 +72,7 @@ public record VirtualCluster(@JsonProperty(required = true) String name,
                           boolean logNetwork,
                           boolean logFrames,
                           @Nullable List<String> filters) {
-        this(name, targetClusters, gateways, logNetwork, logFrames, filters, null);
+        this(name, targetClusters, gateways, logNetwork, logFrames, filters, null, null);
     }
 
     boolean isDnsLabel(String name) {
@@ -95,6 +96,10 @@ public record VirtualCluster(@JsonProperty(required = true) String name,
                     "Gateway names for a virtual cluster must be unique. The following gateway names are duplicated: [%s]".formatted(
                             String.join(", ", duplicates)));
         }
+    }
+
+    CacheConfiguration topicNameCacheConfig() {
+        return topicNameCache == null ? CacheConfiguration.DEFAULT : topicNameCache;
     }
 
 }

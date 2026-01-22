@@ -6,7 +6,6 @@
 
 package io.kroxylicious.systemtests;
 
-import java.io.IOException;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -71,9 +70,10 @@ import static org.awaitility.Awaitility.await;
 class OperatorChangeDetectionST extends AbstractST {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(OperatorChangeDetectionST.class);
+    private static final String PREFIX = "optr-cd";
     private static Kroxylicious kroxylicious;
     private static CertManager certManager;
-    private final String kafkaClusterName = "my-cluster";
+    private final String kafkaClusterName = PREFIX + "-cluster";
     private KroxyliciousOperator kroxyliciousOperator;
 
     @Test
@@ -133,7 +133,7 @@ class OperatorChangeDetectionST extends AbstractST {
     void shouldUpdateDeploymentWhenDownstreamTlsCertUpdated(String namespace) {
         // Given
         var issuer = certManager.issuer(namespace);
-        var cert = certManager.certFor(namespace, "my-cluster-cluster-ip." + namespace + ".svc.cluster.local");
+        var cert = certManager.certFor(namespace, PREFIX + "-cluster-ip." + namespace + ".svc.cluster.local");
 
         resourceManager.createOrUpdateResourceWithWait(issuer, cert);
 
@@ -159,7 +159,7 @@ class OperatorChangeDetectionST extends AbstractST {
     void shouldUpdateDeploymentWhenDownstreamTrustUpdated(String namespace) {
         // Given
         var issuer = certManager.issuer(namespace);
-        var cert = certManager.certFor(namespace, "my-cluster-cluster-ip." + namespace + ".svc.cluster.local");
+        var cert = certManager.certFor(namespace, PREFIX + "-cluster-ip." + namespace + ".svc.cluster.local");
 
         resourceManager.createOrUpdateResourceWithWait(issuer, cert);
 
@@ -353,7 +353,7 @@ class OperatorChangeDetectionST extends AbstractST {
     }
 
     @BeforeEach
-    void setUp(String namespace) throws IOException {
+    void setUp(String namespace) {
         kroxylicious = new Kroxylicious(namespace);
         certManager = new CertManager();
         certManager.deploy();

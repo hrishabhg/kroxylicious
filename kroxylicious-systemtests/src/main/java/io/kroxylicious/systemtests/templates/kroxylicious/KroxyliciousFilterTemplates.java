@@ -29,8 +29,8 @@ import io.kroxylicious.authorizer.provider.acl.AclAuthorizerService;
 import io.kroxylicious.filter.authorization.Authorization;
 import io.kroxylicious.filter.authorization.AuthorizationConfig;
 import io.kroxylicious.filter.encryption.RecordEncryption;
-import io.kroxylicious.filters.sasl.inspection.Config;
-import io.kroxylicious.filters.sasl.inspection.SaslInspection;
+import io.kroxylicious.filter.sasl.inspection.Config;
+import io.kroxylicious.filter.sasl.inspection.SaslInspection;
 import io.kroxylicious.kms.service.TestKmsFacade;
 import io.kroxylicious.kubernetes.api.v1alpha1.KafkaProtocolFilterBuilder;
 import io.kroxylicious.systemtests.Constants;
@@ -58,7 +58,7 @@ public final class KroxyliciousFilterTemplates {
                 .enable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
                 .disable(DeserializationFeature.FAIL_ON_MISSING_EXTERNAL_TYPE_ID_PROPERTY)
                 .enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION)
-                .setSerializationInclusion(JsonInclude.Include.NON_DEFAULT);
+                .setDefaultPropertyInclusion(JsonInclude.Include.NON_DEFAULT);
     }
 
     /**

@@ -141,7 +141,7 @@ public final class KafkaProxy implements AutoCloseable {
     public KafkaProxy(PluginFactoryRegistry pfr, Configuration config, Features features) {
         this.pfr = requireNonNull(pfr);
         this.config = validate(requireNonNull(config), requireNonNull(features));
-        this.virtualClusterModels = config.virtualClusterModel(pfr);
+        this.virtualClusterModels = config.virtualClusterModel();
         this.managementConfiguration = config.management();
         this.micrometerConfig = config.getMicrometer();
     }
@@ -219,8 +219,9 @@ public final class KafkaProxy implements AutoCloseable {
             return this;
         }
         catch (RuntimeException e) {
+            STARTUP_SHUTDOWN_LOGGER.error("Exception during startup, shutting down", e);
             shutdown();
-            throw e;
+            throw new LifecycleException("Startup completed exceptionally", e);
         }
     }
 
@@ -317,12 +318,8 @@ public final class KafkaProxy implements AutoCloseable {
                     filterChainFactory.close();
                 }
                 if (t != null) {
-                    if (t instanceof RuntimeException re) {
-                        throw re;
-                    }
-                    else {
-                        throw new RuntimeException(t);
-                    }
+                    STARTUP_SHUTDOWN_LOGGER.warn("Shutdown future completed exceptionally", t);
+                    throw new LifecycleException("Shutdown future completed exceptionally", t);
                 }
                 return null;
             }).toCompletableFuture().join();

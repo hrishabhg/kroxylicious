@@ -30,6 +30,7 @@ import io.netty.handler.ssl.SslContextBuilder;
 
 import io.kroxylicious.proxy.authentication.TransportSubjectBuilder;
 import io.kroxylicious.proxy.authentication.TransportSubjectBuilderService;
+import io.kroxylicious.proxy.config.CacheConfiguration;
 import io.kroxylicious.proxy.config.IllegalConfigurationException;
 import io.kroxylicious.proxy.config.NamedFilterDefinition;
 import io.kroxylicious.proxy.config.PluginFactoryRegistry;
@@ -43,6 +44,7 @@ import io.kroxylicious.proxy.config.tls.SslContextBuildException;
 import io.kroxylicious.proxy.config.tls.Tls;
 import io.kroxylicious.proxy.config.tls.TrustOptions;
 import io.kroxylicious.proxy.config.tls.TrustProvider;
+import io.kroxylicious.proxy.internal.filter.TopicNameCacheFilter;
 import io.kroxylicious.proxy.internal.net.EndpointGateway;
 import io.kroxylicious.proxy.internal.subject.DefaultTransportSubjectBuilderService;
 import io.kroxylicious.proxy.internal.util.StableKroxyliciousLinkGenerator;
@@ -71,15 +73,19 @@ public class VirtualClusterModel {
 
     private final List<NamedFilterDefinition> filters;
 
+    private final CacheConfiguration topicNameCacheConfig;
     private final Optional<SslContext> upstreamSslContext = Optional.empty();
     private final @Nullable TransportSubjectBuilderConfig transportSubjectBuilderConfig;
+    // lazily initialize to delay statistics registration until after the meter registry has been configured
+    @Nullable
+    private TopicNameCacheFilter topicNameCacheFilter = null;
 
     public VirtualClusterModel(String clusterName,
                                List<TargetCluster> targetClusters,
                                boolean logNetwork,
                                boolean logFrames,
                                List<NamedFilterDefinition> filters) {
-        this(clusterName, targetClusters, logNetwork, logFrames, filters, null);
+        this(clusterName, targetClusters, logNetwork, logFrames, filters, new CacheConfiguration(null, null, null), null);
     }
 
     public VirtualClusterModel(String clusterName,
@@ -87,12 +93,14 @@ public class VirtualClusterModel {
                                boolean logNetwork,
                                boolean logFrames,
                                List<NamedFilterDefinition> filters,
+                               CacheConfiguration topicNameCacheConfig,
                                @Nullable TransportSubjectBuilderConfig transportSubjectBuilderConfig) {
         this.clusterName = Objects.requireNonNull(clusterName);
         this.targetClusters = Objects.requireNonNull(targetClusters);
         this.logNetwork = logNetwork;
         this.logFrames = logFrames;
         this.filters = filters;
+        this.topicNameCacheConfig = topicNameCacheConfig;
         this.transportSubjectBuilderConfig = transportSubjectBuilderConfig;
 
         // TODO: https://github.com/kroxylicious/kroxylicious/issues/104 be prepared to reload the SslContext at runtime.
@@ -323,6 +331,13 @@ public class VirtualClusterModel {
         TransportSubjectBuilderService subjectBuilderService = pf.pluginInstance(type);
         subjectBuilderService.initialize(config);
         return subjectBuilderService.build();
+    }
+
+    public TopicNameCacheFilter getTopicNameCacheFilter() {
+        if (topicNameCacheFilter == null) {
+            topicNameCacheFilter = new TopicNameCacheFilter(topicNameCacheConfig, clusterName);
+        }
+        return topicNameCacheFilter;
     }
 
     @SuppressWarnings("OptionalUsedAsFieldOrParameterType")

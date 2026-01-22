@@ -14,28 +14,30 @@ import java.util.concurrent.CompletionStage;
 import org.apache.kafka.common.Uuid;
 import org.apache.kafka.common.message.ApiVersionsResponseData;
 import org.apache.kafka.common.message.MetadataResponseData;
+import org.apache.kafka.common.message.RequestHeaderData;
 import org.apache.kafka.common.protocol.ApiMessage;
 import org.apache.kafka.common.protocol.Errors;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
-import io.netty.util.concurrent.EventExecutor;
+import io.netty.channel.EventLoop;
 
 import io.kroxylicious.proxy.filter.FilterContext;
 import io.kroxylicious.proxy.filter.metadata.TopLevelMetadataErrorException;
 import io.kroxylicious.proxy.filter.metadata.TopicLevelMetadataErrorException;
 import io.kroxylicious.proxy.filter.metadata.TopicNameMapping;
 import io.kroxylicious.proxy.filter.metadata.TopicNameMappingException;
+import io.kroxylicious.proxy.internal.util.RequestHeaderTagger;
 
 import static java.util.concurrent.CompletableFuture.completedFuture;
 import static java.util.concurrent.CompletableFuture.failedFuture;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.entry;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -48,7 +50,7 @@ class TopicNameRetrieverTest {
     public static final String TOPIC_NAME = "topicName";
     public static final String TOPIC_NAME_2 = "topicName2";
     @Mock
-    private EventExecutor eventExecutor;
+    private EventLoop eventExecutor;
 
     @Mock
     private FilterContext filterContext;
@@ -76,39 +78,31 @@ class TopicNameRetrieverTest {
     }
 
     @Test
-    void retrieveEmptyTopicNamesMapping() {
-        when(eventExecutor.inEventLoop()).thenReturn(false);
-        doAnswer(invocation -> {
-            Runnable runnable = invocation.getArgument(0);
-            runnable.run();
-            return null;
-        }).when(eventExecutor).execute(any());
+    void retrieveTopicNamesRequestHeaderContainsTag() {
+        // given
+        MetadataResponseData response = new MetadataResponseData();
+        response.topics().add(getResponseTopic(UUID, TOPIC_NAME));
+        givenSendRequestResponse(completedFuture(response));
         // when
-        CompletionStage<TopicNameMapping> topicNames = getTopicNamesMapping(Set.of());
+        getTopicNamesMapping(Set.of(UUID));
         // then
-        assertThat(topicNames.toCompletableFuture()).succeedsWithin(Duration.ZERO)
-                .satisfies(topicNamesMapping -> {
-                    assertThat(topicNamesMapping.anyFailures()).isFalse();
-                    assertThat(topicNamesMapping.topicNames()).isEmpty();
-                    assertThat(topicNamesMapping.failures()).isEmpty();
-                });
-        verify(filterContext, never()).sendRequest(any(), any());
+        ArgumentCaptor<RequestHeaderData> argumentCaptor = ArgumentCaptor.forClass(RequestHeaderData.class);
+        verify(filterContext).sendRequest(argumentCaptor.capture(), any());
+        assertThat(RequestHeaderTagger.containsTag(argumentCaptor.getValue(), RequestHeaderTagger.Tag.LEARN_TOPIC_NAMES)).isTrue();
     }
 
     @Test
-    void retrieveEmptyTopicNamesMappingInFilterDispatchThread() {
-        when(eventExecutor.inEventLoop()).thenReturn(true);
+    void retrieveEmptyTopicNamesMapping() {
         // when
         CompletionStage<TopicNameMapping> topicNames = getTopicNamesMapping(Set.of());
         // then
-        assertThat(topicNames.toCompletableFuture()).succeedsWithin(Duration.ZERO)
+        assertThat(topicNames).succeedsWithin(Duration.ZERO)
                 .satisfies(topicNamesMapping -> {
                     assertThat(topicNamesMapping.anyFailures()).isFalse();
                     assertThat(topicNamesMapping.topicNames()).isEmpty();
                     assertThat(topicNamesMapping.failures()).isEmpty();
                 });
         verify(filterContext, never()).sendRequest(any(), any());
-        verify(eventExecutor, never()).execute(any());
     }
 
     @Test

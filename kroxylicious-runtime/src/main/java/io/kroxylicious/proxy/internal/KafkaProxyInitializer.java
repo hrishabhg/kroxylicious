@@ -26,24 +26,14 @@ import io.netty.handler.ssl.SslContext;
 import io.netty.util.concurrent.Future;
 
 import io.kroxylicious.proxy.bootstrap.FilterChainFactory;
-import io.kroxylicious.proxy.config.NamedFilterDefinition;
 import io.kroxylicious.proxy.config.PluginFactoryRegistry;
-import io.kroxylicious.proxy.filter.FilterAndInvoker;
-import io.kroxylicious.proxy.filter.FilterContext;
-import io.kroxylicious.proxy.filter.NetFilter;
 import io.kroxylicious.proxy.internal.codec.KafkaMessageListener;
 import io.kroxylicious.proxy.internal.codec.KafkaRequestDecoder;
 import io.kroxylicious.proxy.internal.codec.KafkaResponseEncoder;
-import io.kroxylicious.proxy.internal.filter.ApiVersionsDowngradeFilter;
-import io.kroxylicious.proxy.internal.filter.ApiVersionsIntersectFilter;
-import io.kroxylicious.proxy.internal.filter.BrokerAddressFilter;
-import io.kroxylicious.proxy.internal.filter.EagerMetadataLearner;
-import io.kroxylicious.proxy.internal.filter.NettyFilterContext;
 import io.kroxylicious.proxy.internal.metrics.MetricEmittingKafkaMessageListener;
 import io.kroxylicious.proxy.internal.net.Endpoint;
 import io.kroxylicious.proxy.internal.net.EndpointBinding;
 import io.kroxylicious.proxy.internal.net.EndpointBindingResolver;
-import io.kroxylicious.proxy.internal.net.EndpointGateway;
 import io.kroxylicious.proxy.internal.net.EndpointReconciler;
 import io.kroxylicious.proxy.internal.session.ClientSessionStateMachine;
 import io.kroxylicious.proxy.internal.util.Metrics;
@@ -191,11 +181,15 @@ public class KafkaProxyInitializer extends ChannelInitializer<Channel> {
             pipeline.addLast("networkLogger", new LoggingHandler("io.kroxylicious.proxy.internal.DownstreamNetworkLogger", LogLevel.INFO));
         }
 
-        // Add handler here
+        ClientSessionStateMachine clientChannelStateMachine = new ClientSessionStateMachine(virtualCluster.getClusterName(), binding);
+
         // TODO https://github.com/kroxylicious/kroxylicious/issues/287 this is in the wrong place, proxy protocol comes over the wire first (so before SSL handler).
         if (haproxyProtocol) {
-            LOGGER.debug("Adding haproxy handler");
+            LOGGER.debug("Adding haproxy handlers");
             pipeline.addLast("HAProxyMessageDecoder", new HAProxyMessageDecoder());
+            // HAProxyMessageHandler intercepts HAProxyMessage and forwards it to the state machine,
+            // preventing it from propagating to filters that only expect Kafka protocol messages
+            pipeline.addLast("HAProxyMessageHandler", new HAProxyMessageHandler(clientChannelStateMachine));
         }
 
         var dp = new DelegatingDecodePredicate();
@@ -214,18 +208,16 @@ public class KafkaProxyInitializer extends ChannelInitializer<Channel> {
             pipeline.addLast("frameLogger", new LoggingHandler("io.kroxylicious.proxy.internal.DownstreamFrameLogger", LogLevel.INFO));
         }
 
-        final NetFilter netFilter = new InitalizerNetFilter(
-                ch,
-                binding,
+        var frontendHandler = new KafkaProxyFrontendHandler(
                 pfr,
                 filterChainFactory,
                 virtualCluster.getFilters(),
                 endpointReconciler,
-                new ApiVersionsIntersectFilter(apiVersionsService),
-                new ApiVersionsDowngradeFilter(apiVersionsService));
-
-        ClientSessionStateMachine clientChannelStateMachine = new ClientSessionStateMachine(virtualCluster.getClusterName(), binding);
-        var frontendHandler = new KafkaProxyFrontendHandler(netFilter, dp, virtualCluster.subjectBuilder(pfr), binding, clientChannelStateMachine);
+                apiVersionsService,
+                dp,
+                virtualCluster.subjectBuilder(pfr),
+                binding,
+                clientChannelStateMachine);
 
         pipeline.addLast("netHandler", frontendHandler);
         addLoggingErrorHandler(pipeline);
@@ -253,67 +245,6 @@ public class KafkaProxyInitializer extends ChannelInitializer<Channel> {
 
     private static void addLoggingErrorHandler(ChannelPipeline pipeline) {
         pipeline.addLast(LOGGING_INBOUND_ERROR_HANDLER_NAME, LOGGING_INBOUND_ERROR_HANDLER);
-    }
-
-    @VisibleForTesting
-    static class InitalizerNetFilter implements NetFilter {
-
-        private final Channel ch;
-        private final EndpointGateway gateway;
-        private final EndpointBinding binding;
-        private final PluginFactoryRegistry pfr;
-        private final FilterChainFactory filterChainFactory;
-        private final List<NamedFilterDefinition> filterDefinitions;
-        private final EndpointReconciler endpointReconciler;
-        private final ApiVersionsIntersectFilter apiVersionsIntersectFilter;
-        private final ApiVersionsDowngradeFilter apiVersionsDowngradeFilter;
-        private List<FilterAndInvoker> cachedFilters = List.of();
-
-        InitalizerNetFilter(Channel ch,
-                            EndpointBinding binding,
-                            PluginFactoryRegistry pfr,
-                            FilterChainFactory filterChainFactory,
-                            List<NamedFilterDefinition> filterDefinitions,
-                            EndpointReconciler endpointReconciler,
-                            ApiVersionsIntersectFilter apiVersionsIntersectFilter,
-                            ApiVersionsDowngradeFilter apiVersionsDowngradeFilter) {
-            this.ch = ch;
-            this.gateway = binding.endpointGateway();
-            this.binding = binding;
-            this.pfr = pfr;
-            this.filterChainFactory = filterChainFactory;
-            this.filterDefinitions = filterDefinitions;
-            this.endpointReconciler = endpointReconciler;
-            this.apiVersionsIntersectFilter = apiVersionsIntersectFilter;
-            this.apiVersionsDowngradeFilter = apiVersionsDowngradeFilter;
-        }
-
-        @Override
-        public void selectServer(NetFilter.NetFilterContext context, ApiKeys apiKey, FilterContext filterContext) {
-            LOGGER.info("{}: Selecting NetFilter.NetFilter context: {}", ch, context);
-            cachedFilters = getFilterAndInvokerCollection();
-            context.initiateConnect(binding.upstreamServiceEndpoints(apiKey), cachedFilters);
-        }
-
-        @NonNull
-        public ArrayList<FilterAndInvoker> getFilterAndInvokerCollection() {
-            List<FilterAndInvoker> apiVersionFilters = FilterAndInvoker.build("ApiVersionsIntersect (internal)", apiVersionsIntersectFilter);
-
-            NettyFilterContext filterContext = new NettyFilterContext(ch.eventLoop(), pfr);
-            List<FilterAndInvoker> filterChain = filterChainFactory.createFilters(filterContext, filterDefinitions);
-            List<FilterAndInvoker> brokerAddressFilters = FilterAndInvoker.build("BrokerAddress (internal)", new BrokerAddressFilter(gateway, endpointReconciler));
-            // List<FilterAndInvoker> shortCircuitFilters = FilterAndInvoker.build("ShortCircuit (internal)", new ShortCircuitFilter());
-            var filters = new ArrayList<>(apiVersionFilters);
-            filters.addAll(FilterAndInvoker.build("ApiVersionsDowngrade (internal)", apiVersionsDowngradeFilter));
-            filters.addAll(filterChain);
-            if (binding.restrictUpstreamToMetadataDiscovery()) {
-                filters.addAll(FilterAndInvoker.build("EagerMetadataLearner (internal)", new EagerMetadataLearner()));
-            }
-            // filters.addAll(shortCircuitFilters);
-            filters.addAll(brokerAddressFilters);
-            cachedFilters = filters;
-            return filters;
-        }
     }
 
     @Sharable

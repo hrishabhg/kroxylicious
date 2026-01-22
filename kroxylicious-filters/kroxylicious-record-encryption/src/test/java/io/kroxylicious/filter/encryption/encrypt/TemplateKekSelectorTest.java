@@ -45,7 +45,7 @@ class TemplateKekSelectorTest {
     }
 
     @AfterEach
-    public void afterEach() {
+    void afterEach() {
         Optional.ofNullable(kmsService).ifPresent(UnitTestingKmsService::close);
     }
 
@@ -129,7 +129,7 @@ class TemplateKekSelectorTest {
     void shouldNotThrowWhenAliasDoesNotExist_UnknownAliasExceptionWrappedInCompletionException() throws ExecutionException, InterruptedException {
         var kms = mock(InMemoryKms.class);
         var result = CompletableFuture.completedFuture(null)
-                .<UUID> thenApply((u) -> {
+                .<UUID> thenApply(u -> {
                     // this exception will be wrapped by a CompletionException
                     throw new UnknownAliasException("mock alias exception");
                 });
