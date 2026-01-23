@@ -70,7 +70,7 @@ public class BackendStateMachine {
     private final String clusterId;
     private final TargetCluster targetCluster;
     private final ServiceEndpoint serviceEndpoint;
-    private final ClusterConnectionManager connectionManager;
+    private final ProxyChannelStateMachine connectionManager;
     private final int socketFrameMaxSizeBytes;
     private final boolean logNetwork;
     private final boolean logFrames;
@@ -100,7 +100,7 @@ public class BackendStateMachine {
 
     public BackendStateMachine(
                                ServiceEndpoint serviceEndpoint,
-                               ClusterConnectionManager connectionManager,
+                               ProxyChannelStateMachine connectionManager,
                                int socketFrameMaxSizeBytes,
                                boolean logNetwork,
                                boolean logFrames,

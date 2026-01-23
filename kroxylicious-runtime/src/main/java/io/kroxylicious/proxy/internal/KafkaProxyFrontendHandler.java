@@ -53,7 +53,7 @@ import io.kroxylicious.proxy.internal.filter.NettyFilterContext;
 import io.kroxylicious.proxy.internal.net.EndpointBinding;
 import io.kroxylicious.proxy.internal.net.EndpointReconciler;
 import io.kroxylicious.proxy.internal.session.ClientSessionStateMachine;
-import io.kroxylicious.proxy.internal.session.ClusterConnectionManager;
+import io.kroxylicious.proxy.internal.session.ProxyChannelStateMachine;
 import io.kroxylicious.proxy.model.VirtualClusterModel;
 import io.kroxylicious.proxy.service.HostPort;
 import io.kroxylicious.proxy.service.ServiceEndpoint;
@@ -79,7 +79,7 @@ import static io.kroxylicious.proxy.internal.ProxyChannelState.SelectingServer;
  * </ul>
  *
  * <p>Works with {@link ClientSessionStateMachine} for session state management
- * and {@link ClusterConnectionManager} for backend connection management.</p>
+ * and {@link ProxyChannelStateMachine} for backend connection management.</p>
  */
 public class KafkaProxyFrontendHandler
         extends ChannelInboundHandlerAdapter {
@@ -99,11 +99,8 @@ public class KafkaProxyFrontendHandler
     private final ApiVersionsIntersectFilter apiVersionsIntersectFilter;
     private final ApiVersionsDowngradeFilter apiVersionsDowngradeFilter;
 
-    // Session management (replaces old ProxyChannelStateMachine)
-    private final ClientSessionStateMachine sessionStateMachine;
-
     // Connection management (manages one or more backend connections)
-    private @Nullable ClusterConnectionManager connectionManager;
+    private final ProxyChannelStateMachine proxyChannelStateMachine;
 
     // Client channel context
     private @Nullable ChannelHandlerContext clientCtx;
@@ -155,7 +152,7 @@ public class KafkaProxyFrontendHandler
                               DelegatingDecodePredicate dp,
                               TransportSubjectBuilder subjectBuilder,
                               EndpointBinding endpointBinding,
-                              ClientSessionStateMachine sessionStateMachine) {
+                              ProxyChannelStateMachine proxyChannelStateMachine) {
         this.endpointBinding = endpointBinding;
         this.pfr = pfr;
         this.filterChainFactory = filterChainFactory;
@@ -166,7 +163,7 @@ public class KafkaProxyFrontendHandler
         this.dp = dp;
         this.subjectBuilder = Objects.requireNonNull(subjectBuilder);
         this.virtualClusterModel = endpointBinding.endpointGateway().virtualCluster();
-        this.sessionStateMachine = sessionStateMachine;
+        this.proxyChannelStateMachine = proxyChannelStateMachine;
         this.logNetwork = virtualClusterModel.isLogNetwork();
         this.logFrames = virtualClusterModel.isLogFrames();
         this.filters = null;
@@ -176,7 +173,7 @@ public class KafkaProxyFrontendHandler
     public String toString() {
         return "KafkaProxyFrontendHandler{" +
                 "clientCtx=" + clientCtx +
-                ", sessionState=" + sessionStateMachine.currentStateName() +
+                ", sessionState=" + proxyChannelStateMachine.currentState() +
                 ", number of bufferedMsgs=" + (bufferedMsgs == null ? 0 : bufferedMsgs.size()) +
                 ", pendingClientFlushes=" + pendingClientFlushes +
                 ", sniHostname='" + sniHostname + '\'' +
@@ -225,7 +222,7 @@ public class KafkaProxyFrontendHandler
     @Override
     public void channelActive(ChannelHandlerContext ctx) throws Exception {
         this.clientCtx = ctx;
-        this.sessionStateMachine.onClientActive(this);
+        this.proxyChannelStateMachine.onClientActive(this);
     }
 
     /**
@@ -235,7 +232,7 @@ public class KafkaProxyFrontendHandler
     @Override
     public void channelInactive(ChannelHandlerContext ctx) {
         LOGGER.trace("INACTIVE on inbound {}", ctx.channel());
-        sessionStateMachine.onClientInactive();
+        proxyChannelStateMachine.onClientInactive();
     }
 
     /**
@@ -247,10 +244,10 @@ public class KafkaProxyFrontendHandler
             throws Exception {
         super.channelWritabilityChanged(ctx);
         if (ctx.channel().isWritable()) {
-            sessionStateMachine.onClientWritable();
+            proxyChannelStateMachine.onClientWritable();
         }
         else {
-            sessionStateMachine.onClientUnwritable();
+            proxyChannelStateMachine.onClientUnwritable();
         }
     }
 
@@ -263,7 +260,7 @@ public class KafkaProxyFrontendHandler
     public void channelRead(
                             ChannelHandlerContext ctx,
                             Object msg) {
-        sessionStateMachine.onClientRequest(msg);
+        proxyChannelStateMachine.onClientRequest(msg);
     }
 
     /**
@@ -328,7 +325,7 @@ public class KafkaProxyFrontendHandler
         initiateConnect(target, getFilters());
         // NetFilter.selectServer() will callback on initiateConnect()
         // this.netFilter.selectServer(this, routingContext);
-        this.sessionStateMachine.assertIsRouting(
+        this.proxyChannelStateMachine.assertIsRouting(
                 "NetFilter.selectServer() did not callback on NetFilterContext.initiateConnect(): filter=''");
     }
 
@@ -364,14 +361,14 @@ public class KafkaProxyFrontendHandler
      */
     @Override
     public void channelReadComplete(ChannelHandlerContext clientCtx) {
-        sessionStateMachine.clientReadComplete();
+        proxyChannelStateMachine.clientReadComplete();
     }
 
     /**
      * Called when connecting to multiple clusters.
      *
      * <p>Note: Connection initiation is handled by {@link ClientSessionStateMachine} which
-     * calls {@link ClusterConnectionManager#initiateMultiClusterConnection}. This method
+     * calls {@link ProxyChannelStateMachine#initiateMultiClusterConnection}. This method
      * only stores references and sets up the decode predicate.</p>
      *
      * @param serviceEndpoints service endpoints
@@ -380,12 +377,12 @@ public class KafkaProxyFrontendHandler
      */
     @Override
     public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) {
-        sessionStateMachine.onClientException(cause, endpointBinding.endpointGateway().getDownstreamSslContext().isPresent());
+        proxyChannelStateMachine.onClientException(cause, endpointBinding.endpointGateway().getDownstreamSslContext().isPresent());
     }
 
     /**
      * Initiates the connection to a server.
-     * Changes {@link #sessionStateMachine} from {@link SelectingServer} to {@link Connecting}
+     * Changes {@link #proxyChannelStateMachine} from {@link SelectingServer} to {@link Connecting}
      * Initializes the {@code backendHandler} and configures its pipeline
      * with the given {@code filters}.
      * @param remote upstream broker target
@@ -396,9 +393,9 @@ public class KafkaProxyFrontendHandler
                          List<FilterAndInvoker> filters) {
         if (LOGGER.isDebugEnabled()) {
             LOGGER.debug("{}: Connecting to backend broker {} using filters {}",
-                    this.sessionStateMachine.sessionId(), remote, filters);
+                    this.proxyChannelStateMachine.sessionId(), remote, filters);
         }
-        this.sessionStateMachine.onInitiateConnect(remote, filters, virtualClusterModel);
+        this.proxyChannelStateMachine.onInitiateConnect(remote, filters, virtualClusterModel);
     }
 
     /**
@@ -411,7 +408,7 @@ public class KafkaProxyFrontendHandler
         // Start the upstream connection attempt.
         final Bootstrap bootstrap = configureBootstrap(backendHandler, inboundChannel);
 
-        LOGGER.debug("{}: Connecting to outbound {}", this.sessionStateMachine.sessionId(), remote);
+        LOGGER.debug("{}: Connecting to outbound {}", this.proxyChannelStateMachine.sessionId(), remote);
         ChannelFuture serverTcpConnectFuture = initConnection(remote.host(), remote.port(), bootstrap);
         Channel outboundChannel = serverTcpConnectFuture.channel();
         ChannelPipeline pipeline = outboundChannel.pipeline();
@@ -449,13 +446,13 @@ public class KafkaProxyFrontendHandler
     public void inMultiClusterConnecting(
                                          List<ServiceEndpoint> serviceEndpoints,
                                          List<FilterAndInvoker> filters,
-                                         ClusterConnectionManager connectionManager) {
+                                         ProxyChannelStateMachine connectionManager) {
 
         this.connectionManager = connectionManager;
         this.filters = filters;
 
         LOGGER.info("{}: Connecting to {} clusters using filters {}",
-                sessionStateMachine.sessionId(), serviceEndpoints.size(), filters);
+                proxyChannelStateMachine.sessionId(), serviceEndpoints.size(), filters);
 
         // Update decode predicate with filter requirements
         // Connection is initiated by ClientSessionStateMachine.onNetFilterInitiateMultiClusterConnect()
@@ -468,16 +465,16 @@ public class KafkaProxyFrontendHandler
      */
     public void onBackendConnected(String clusterId, HostPort hostPort) {
 
-        LOGGER.debug("{}: Backend#{}.{} connected", sessionStateMachine.sessionId(), clusterId, hostPort);
+        LOGGER.debug("{}: Backend#{}.{} connected", proxyChannelStateMachine.sessionId(), clusterId, hostPort);
 
         // check if all backends are connected
         if (connectionManager != null && !connectionManager.areAllConnected()) {
-            LOGGER.debug("{}: waiting for other backends to connect", sessionStateMachine.sessionId());
+            LOGGER.debug("{}: waiting for other backends to connect", proxyChannelStateMachine.sessionId());
             return;
         }
 
         LOGGER.debug("{}: backend connected, forwarding {} buffered messages",
-                sessionStateMachine.sessionId(), bufferedMsgs == null ? 0 : bufferedMsgs.size());
+                proxyChannelStateMachine.sessionId(), bufferedMsgs == null ? 0 : bufferedMsgs.size());
 
         // Forward buffered messages
         if (bufferedMsgs != null && connectionManager != null) {
@@ -541,7 +538,7 @@ public class KafkaProxyFrontendHandler
             inboundChannel.flush();
         }
         if (!inboundChannel.isWritable()) {
-            sessionStateMachine.onClientUnwritable();
+            proxyChannelStateMachine.onClientUnwritable();
         }
     }
 
@@ -567,10 +564,10 @@ public class KafkaProxyFrontendHandler
 
         if (LOGGER.isDebugEnabled()) {
             LOGGER.debug("{}: Connecting to backend endpoints {} using filters {}",
-                    sessionStateMachine.sessionId(), serviceEndpoints, filters);
+                    proxyChannelStateMachine.sessionId(), serviceEndpoints, filters);
         }
 
-        sessionStateMachine.onNetFilterInitiateMultiClusterConnect(serviceEndpoints, filters, virtualClusterModel);
+        proxyChannelStateMachine.onNetFilterInitiateMultiClusterConnect(serviceEndpoints, filters, virtualClusterModel);
     }
 
     private void addFiltersToPipeline(
@@ -592,20 +589,19 @@ public class KafkaProxyFrontendHandler
                             sniHostname,
                             virtualClusterModel,
                             inboundChannel,
-                            sessionStateMachine,
-                            clientSubjectManager,
-                            endpointBinding));
+                            proxyChannelStateMachine,
+                            clientSubjectManager));
         }
     }
 
     private void unblockClient() {
         var inboundChannel = clientCtx().channel();
         inboundChannel.config().setAutoRead(true);
-        sessionStateMachine.onClientWritable();
+        proxyChannelStateMachine.onClientWritable();
     }
 
     private ChannelHandlerContext clientCtx() {
-        return Objects.requireNonNull(this.clientCtx, "clientCtx was null while in state " + this.sessionStateMachine.state());
+        return Objects.requireNonNull(this.clientCtx, "clientCtx was null while in state " + this.proxyChannelStateMachine.state());
     }
 
     private static ResponseFrame buildErrorResponseFrame(

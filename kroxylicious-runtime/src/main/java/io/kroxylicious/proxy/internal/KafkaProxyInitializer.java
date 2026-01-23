@@ -5,10 +5,6 @@
  */
 package io.kroxylicious.proxy.internal;
 
-import java.util.ArrayList;
-import java.util.List;
-
-import org.apache.kafka.common.protocol.ApiKeys;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -35,12 +31,10 @@ import io.kroxylicious.proxy.internal.net.Endpoint;
 import io.kroxylicious.proxy.internal.net.EndpointBinding;
 import io.kroxylicious.proxy.internal.net.EndpointBindingResolver;
 import io.kroxylicious.proxy.internal.net.EndpointReconciler;
-import io.kroxylicious.proxy.internal.session.ClientSessionStateMachine;
+import io.kroxylicious.proxy.internal.session.ProxyChannelStateMachine;
 import io.kroxylicious.proxy.internal.util.Metrics;
 import io.kroxylicious.proxy.model.VirtualClusterModel;
 import io.kroxylicious.proxy.tag.VisibleForTesting;
-
-import edu.umd.cs.findbugs.annotations.NonNull;
 
 public class KafkaProxyInitializer extends ChannelInitializer<Channel> {
 
@@ -181,7 +175,11 @@ public class KafkaProxyInitializer extends ChannelInitializer<Channel> {
             pipeline.addLast("networkLogger", new LoggingHandler("io.kroxylicious.proxy.internal.DownstreamNetworkLogger", LogLevel.INFO));
         }
 
-        ClientSessionStateMachine clientChannelStateMachine = new ClientSessionStateMachine(virtualCluster.getClusterName(), binding);
+        ProxyChannelStateMachine proxyChannelStateMachine = new ProxyChannelStateMachine(virtualCluster.getClusterName(),
+                binding,
+                virtualCluster.socketFrameMaxSizeBytes(),
+                virtualCluster.isLogNetwork(),
+                virtualCluster.isLogFrames());
 
         // TODO https://github.com/kroxylicious/kroxylicious/issues/287 this is in the wrong place, proxy protocol comes over the wire first (so before SSL handler).
         if (haproxyProtocol) {
@@ -189,7 +187,7 @@ public class KafkaProxyInitializer extends ChannelInitializer<Channel> {
             pipeline.addLast("HAProxyMessageDecoder", new HAProxyMessageDecoder());
             // HAProxyMessageHandler intercepts HAProxyMessage and forwards it to the state machine,
             // preventing it from propagating to filters that only expect Kafka protocol messages
-            pipeline.addLast("HAProxyMessageHandler", new HAProxyMessageHandler(clientChannelStateMachine));
+            pipeline.addLast("HAProxyMessageHandler", new HAProxyMessageHandler(proxyChannelStateMachine));
         }
 
         var dp = new DelegatingDecodePredicate();
@@ -217,7 +215,7 @@ public class KafkaProxyInitializer extends ChannelInitializer<Channel> {
                 dp,
                 virtualCluster.subjectBuilder(pfr),
                 binding,
-                clientChannelStateMachine);
+                proxyChannelStateMachine);
 
         pipeline.addLast("netHandler", frontendHandler);
         addLoggingErrorHandler(pipeline);

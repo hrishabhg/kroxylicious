@@ -13,7 +13,7 @@
  * <ul>
  *   <li>{@link io.kroxylicious.proxy.internal.net.RoutingContextImpl} -
  *       Implementation of {@link io.kroxylicious.proxy.net.RoutingContext}
- *       that bridges filters to the {@link io.kroxylicious.proxy.internal.session.ClusterConnectionManager}</li>
+ *       that bridges filters to the {@link io.kroxylicious.proxy.internal.session.ProxyChannelStateMachine}</li>
  *
  *   <li>{@link io.kroxylicious.proxy.internal.net.ClusterRouteImpl} -
  *       Implementation of {@link io.kroxylicious.proxy.net.ClusterRoute}
@@ -35,14 +35,14 @@
  *                           ▼
  *   ┌──────────────────────────────────────────────────────────────┐
  *   │                  RUNTIME LAYER (this package)                │
- *   │  RoutingContextImpl wraps ClusterConnectionManager           │
+ *   │  RoutingContextImpl wraps ProxyChannelStateMachine           │
  *   │  ClusterRouteImpl wraps BackendStateMachine                  │
  *   └──────────────────────────────────────────────────────────────┘
  *                           │
  *                           ▼
  *   ┌──────────────────────────────────────────────────────────────┐
  *   │                  SESSION LAYER                               │
- *   │  ClusterConnectionManager manages BackendStateMachine(s)     │
+ *   │  ProxyChannelStateMachine manages BackendStateMachine(s)     │
  *   │  BackendStateMachine manages Netty channel per cluster       │
  *   └──────────────────────────────────────────────────────────────┘
  * </pre>
@@ -64,7 +64,7 @@
  *
  * @see io.kroxylicious.proxy.net.RoutingContext
  * @see io.kroxylicious.proxy.net.ClusterRoute
- * @see io.kroxylicious.proxy.internal.session.ClusterConnectionManager
+ * @see io.kroxylicious.proxy.internal.session.ProxyChannelStateMachine
  * @see io.kroxylicious.proxy.internal.session.BackendStateMachine
  */
 

@@ -28,6 +28,7 @@ import io.netty.channel.Channel;
 import io.kroxylicious.proxy.filter.FilterAndInvoker;
 import io.kroxylicious.proxy.frame.DecodedResponseFrame;
 import io.kroxylicious.proxy.frame.Frame;
+import io.kroxylicious.proxy.internal.KafkaProxyFrontendHandler;
 import io.kroxylicious.proxy.internal.net.EndpointBinding;
 import io.kroxylicious.proxy.internal.router.AggregationContext;
 import io.kroxylicious.proxy.internal.router.Router;
@@ -59,7 +60,7 @@ import edu.umd.cs.findbugs.annotations.Nullable;
  *   ClientSessionStateMachine
  *           │
  *           ▼
- *   ClusterConnectionManager  ◀── NetFilter initiates connections here
+ *   ProxyChannelStateMachine  ◀── NetFilter initiates connections here
  *           │
  *     ┌─────┼─────┐
  *     ▼     ▼     ▼
@@ -69,13 +70,13 @@ import edu.umd.cs.findbugs.annotations.Nullable;
  *   Cluster₁ Cluster₂ Cluster₃
  * </pre>
  */
-public class ClusterConnectionManager {
-
-    private static final Logger LOGGER = LoggerFactory.getLogger(ClusterConnectionManager.class);
+public class ProxyChannelStateMachine {
+    private static final String DUPLICATE_INITIATE_CONNECT_ERROR = "onInitiateConnect called more than once";
+    private static final Logger LOGGER = LoggerFactory.getLogger(ProxyChannelStateMachine.class);
 
     private final String sessionId;
     private final String virtualClusterName;
-    private final ClientSessionStateMachine sessionStateMachine;
+    private final KafkaProxyFrontendHandler frontendHandler;
     private final int socketFrameMaxSizeBytes;
     private final boolean logNetwork;
     private final boolean logFrames;
@@ -90,23 +91,20 @@ public class ClusterConnectionManager {
     private final Map<Integer, AggregationContext<?>> aggregationCorrelationManager = new ConcurrentHashMap<>();
 
     private volatile ServiceEndpoint defaultTarget;
-    private EndpointBinding endpointBinding;
+    private final EndpointBinding endpointBinding;
+
+    private @Nullable Channel inboundChannel;
 
     // Filters applied to this session
     private @Nullable List<FilterAndInvoker> filters;
 
-    // Client channel for connection initialization
-    private @Nullable Channel inboundChannel;
-
-    private Router router;
+    private final Router router;
 
     // Connection state
     private volatile boolean anyConnected = false;
 
-    public ClusterConnectionManager(
-                                    String sessionId,
+    public ProxyChannelStateMachine(
                                     String virtualClusterName,
-                                    ClientSessionStateMachine sessionStateMachine,
                                     EndpointBinding endpointBinding,
                                     int socketFrameMaxSizeBytes,
                                     boolean logNetwork,
@@ -450,7 +448,7 @@ public class ClusterConnectionManager {
 
     @Override
     public String toString() {
-        return "ClusterConnectionManager{" +
+        return "ProxyChannelStateMachine{" +
                 "sessionId='" + sessionId + '\'' +
                 ", clusters=" + backends.keySet() +
                 ", primaryClusterId='" + defaultTarget + '\'' +

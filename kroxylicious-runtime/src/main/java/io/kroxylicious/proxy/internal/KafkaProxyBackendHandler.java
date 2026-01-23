@@ -20,6 +20,7 @@ import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslHandshakeCompletionEvent;
 
 import io.kroxylicious.proxy.internal.session.BackendStateMachine;
+import io.kroxylicious.proxy.internal.session.ProxyChannelStateMachine;
 import io.kroxylicious.proxy.tag.VisibleForTesting;
 
 import edu.umd.cs.findbugs.annotations.Nullable;
@@ -37,7 +38,7 @@ import edu.umd.cs.findbugs.annotations.Nullable;
  * </ul>
  *
  * <p>Works with {@link BackendStateMachine} which manages the connection state
- * and coordinates with {@link io.kroxylicious.proxy.internal.session.ClusterConnectionManager}
+ * and coordinates with {@link ProxyChannelStateMachine}
  * for multi-cluster scenarios.</p>
  */
 public class KafkaProxyBackendHandler extends ChannelInboundHandlerAdapter {

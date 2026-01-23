@@ -17,7 +17,7 @@
  * Client → FrontendHandler → ClientSessionSM ───┼─► BackendStateMachine₂ → Cluster₂
  *                                    │          └─► BackendStateMachine₃ → Cluster₃
  *                                    │
- *                                    └── ClusterConnectionManager
+ *                                    └── ProxyChannelStateMachine
  * </pre>
  *
  * <h2>Key Components</h2>
@@ -35,13 +35,13 @@
  *   <dt>{@link io.kroxylicious.proxy.internal.session.BackendStateMachine}</dt>
  *   <dd>Manages individual cluster connection lifecycle</dd>
  *
- *   <dt>{@link io.kroxylicious.proxy.internal.session.ClusterConnectionManager}</dt>
+ *   <dt>{@link io.kroxylicious.proxy.internal.session.ProxyChannelStateMachine}</dt>
  *   <dd>Aggregates multiple BackendStateMachines, provides routing and backpressure coordination</dd>
  * </dl>
  *
  * <h2>Single vs Multi-Cluster</h2>
  *
- * <p>For single-cluster deployments, ClusterConnectionManager contains exactly one BackendStateMachine.
+ * <p>For single-cluster deployments, ProxyChannelStateMachine contains exactly one BackendStateMachine.
  * For multi-cluster, it contains one per configured cluster. The API is identical in both cases.</p>
  *
  * <h2>Migration from ProxyChannelStateMachine</h2>
@@ -60,7 +60,7 @@
  * </table>
  *
  * @see io.kroxylicious.proxy.internal.session.ClientSessionStateMachine
- * @see io.kroxylicious.proxy.internal.session.ClusterConnectionManager
+ * @see io.kroxylicious.proxy.internal.session.ProxyChannelStateMachine
  * @see io.kroxylicious.proxy.internal.session.BackendStateMachine
  */
 @ReturnValuesAreNonnullByDefault

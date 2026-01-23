@@ -12,6 +12,8 @@ import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.handler.codec.haproxy.HAProxyMessage;
 
+import io.kroxylicious.proxy.internal.session.ProxyChannelStateMachine;
+
 /**
  * A channel handler that intercepts {@link HAProxyMessage} objects emitted by
  * Netty's {@link io.netty.handler.codec.haproxy.HAProxyMessageDecoder} and

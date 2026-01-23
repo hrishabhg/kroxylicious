@@ -19,7 +19,6 @@ import org.slf4j.LoggerFactory;
 
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.Timer;
-import io.netty.channel.Channel;
 import io.netty.handler.codec.DecoderException;
 import io.netty.handler.codec.haproxy.HAProxyMessage;
 
@@ -42,7 +41,7 @@ import edu.umd.cs.findbugs.annotations.Nullable;
  * State machine managing a single client session.
  *
  * <p>This class manages client session lifecycle and delegates backend connection
- * orchestration to {@link ClusterConnectionManager}.</p>
+ * orchestration to {@link ProxyChannelStateMachine}.</p>
  *
  * <h2>Responsibilities</h2>
  * <ul>
@@ -64,7 +63,7 @@ import edu.umd.cs.findbugs.annotations.Nullable;
  *   ClientSessionStateMachine (Session Lifecycle)
  *           │
  *           ▼
- *   ClusterConnectionManager (Backend Orchestration)
+ *   ProxyChannelStateMachine (Backend Orchestration)
  *           │
  *     ┌─────┼─────┐
  *     ▼     ▼     ▼
@@ -88,7 +87,7 @@ public class ClientSessionStateMachine {
     private @Nullable KafkaProxyFrontendHandler frontendHandler;
 
     // Connection manager - created at session start, orchestrates backend connections
-    private ClusterConnectionManager connectionManager;
+    private ProxyChannelStateMachine connectionManager;
 
     // Virtual cluster configuration (set on first connection initiation)
     private @Nullable VirtualClusterModel virtualClusterModel;
@@ -128,7 +127,7 @@ public class ClientSessionStateMachine {
     }
 
     @Nullable
-    public ClusterConnectionManager connectionManager() {
+    public ProxyChannelStateMachine connectionManager() {
         return connectionManager;
     }
 
@@ -231,13 +230,12 @@ public class ClientSessionStateMachine {
     /**
      * Called by NetFilter to initiate multi-cluster connections.
      *
-     * <p>Delegates to {@link ClusterConnectionManager#initiateMultiClusterConnection}.</p>
+     * <p>Delegates to {@link ProxyChannelStateMachine#initiateMultiClusterConnection}.</p>
      */
     public void onNetFilterInitiateMultiClusterConnect(
                                                        List<ServiceEndpoint> serviceEndpoints,
                                                        List<FilterAndInvoker> filters,
-                                                       VirtualClusterModel virtualCluster,
-                                                       NetFilter netFilter) {
+                                                       VirtualClusterModel virtualCluster) {
 
         if (!(state instanceof ClientSessionState.ApiVersions ||
                 state instanceof ClientSessionState.Routing)) {
@@ -262,7 +260,7 @@ public class ClientSessionStateMachine {
      */
     private void ensureConnectionManager(VirtualClusterModel virtualCluster) {
         if (connectionManager == null) {
-            connectionManager = new ClusterConnectionManager(
+            connectionManager = new ProxyChannelStateMachine(
                     sessionId,
                     virtualClusterName,
                     this,
@@ -273,7 +271,7 @@ public class ClientSessionStateMachine {
         }
     }
 
-    // ==================== Callbacks from ClusterConnectionManager ====================
+    // ==================== Callbacks from ProxyChannelStateMachine ====================
 
     void onBackendConnected(BackendStateMachine backend) {
         LOGGER.debug("{}: Backend {} connected", sessionId, backend.clusterId());

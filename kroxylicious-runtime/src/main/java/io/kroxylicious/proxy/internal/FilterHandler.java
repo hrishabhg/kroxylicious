@@ -51,7 +51,6 @@ import io.kroxylicious.proxy.frame.OpaqueRequestFrame;
 import io.kroxylicious.proxy.frame.OpaqueResponseFrame;
 import io.kroxylicious.proxy.internal.filter.RequestFilterResultBuilderImpl;
 import io.kroxylicious.proxy.internal.filter.ResponseFilterResultBuilderImpl;
-import io.kroxylicious.proxy.internal.net.EndpointBinding;
 import io.kroxylicious.proxy.internal.session.ClientSessionStateMachine;
 import io.kroxylicious.proxy.internal.util.Assertions;
 import io.kroxylicious.proxy.internal.util.ByteBufOutputStream;
@@ -69,7 +68,6 @@ public class FilterHandler extends ChannelDuplexHandler {
     private static final Logger LOGGER = LoggerFactory.getLogger(FilterHandler.class);
     private final long timeoutMs;
     private final @Nullable String sniHostname;
-    private final EndpointBinding endpointBinding;
     private final VirtualClusterModel virtualClusterModel;
     private final Channel inboundChannel;
     private final FilterAndInvoker filterAndInvoker;
@@ -92,17 +90,13 @@ public class FilterHandler extends ChannelDuplexHandler {
 
     private static final AtomicBoolean deprecationWarningEmitted = new AtomicBoolean(false);
 
-    /**
-     * Constructor with multi-cluster support.
-     */
     public FilterHandler(FilterAndInvoker filterAndInvoker,
                          long timeoutMs,
                          @Nullable String sniHostname,
                          VirtualClusterModel virtualClusterModel,
                          Channel inboundChannel,
                          ClientSessionStateMachine sessionStateMachine,
-                         ClientSubjectManager clientSubjectManager,
-                         EndpointBinding endpointBinding) {
+                         ClientSubjectManager clientSubjectManager) {
         this.filterAndInvoker = Objects.requireNonNull(filterAndInvoker);
         this.timeoutMs = Assertions.requireStrictlyPositive(timeoutMs, "timeout");
         this.sniHostname = sniHostname;
@@ -110,7 +104,6 @@ public class FilterHandler extends ChannelDuplexHandler {
         this.inboundChannel = inboundChannel;
         this.sessionStateMachine = sessionStateMachine;
         this.clientSubjectManager = clientSubjectManager;
-        this.endpointBinding = endpointBinding;
     }
 
     @Override
@@ -582,12 +575,9 @@ public class FilterHandler extends ChannelDuplexHandler {
         });
     }
 
-    // ==================== InternalFilterContext ====================
-
     private class InternalFilterContext implements FilterContext {
 
         private final DecodedFrame<?, ?> decodedFrame;
-        private final OutboundContext outboundContext;
 
         @Override
         public Subject authenticatedSubject() {
@@ -595,12 +585,7 @@ public class FilterHandler extends ChannelDuplexHandler {
         }
 
         InternalFilterContext(DecodedFrame<?, ?> decodedFrame) {
-            this(decodedFrame, OutboundContext.empty());
-        }
-
-        InternalFilterContext(DecodedFrame<?, ?> decodedFrame, OutboundContext outboundContext) {
             this.decodedFrame = decodedFrame;
-            this.outboundContext = outboundContext;
         }
 
         @Override
@@ -626,7 +611,6 @@ public class FilterHandler extends ChannelDuplexHandler {
             return sniHostname;
         }
 
-        @Override
         public String getVirtualClusterName() {
             return virtualClusterModel.getClusterName();
         }
@@ -704,7 +688,6 @@ public class FilterHandler extends ChannelDuplexHandler {
             return responseFilterResultBuilder().forward(header, response).completed();
         }
 
-        // endpointBinding.upstreamServiceEndpoints(ApiKeys.forId(request.apiKey())).sendRequest(header, request);
         @Override
         public <M extends ApiMessage> CompletionStage<M> sendRequest(RequestHeaderData header,
                                                                      ApiMessage request) {
@@ -740,9 +723,6 @@ public class FilterHandler extends ChannelDuplexHandler {
             return new TopicNameRetriever(this, Objects.requireNonNull(ctx).executor()).topicNames(topicIds);
         }
 
-        @Override
-        public OutboundContext outboundContext() {
-            return outboundContext;
-        }
     }
+
 }

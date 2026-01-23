@@ -6,19 +6,13 @@
 
 package io.kroxylicious.proxy.internal;
 
-import java.util.List;
-import java.util.Map;
 import java.util.Objects;
-import java.util.Optional;
-import java.util.Set;
 
 import org.apache.kafka.common.message.ApiVersionsRequestData;
 
 import io.netty.handler.codec.haproxy.HAProxyMessage;
-import io.netty.handler.ssl.SslContext;
 
 import io.kroxylicious.proxy.frame.DecodedRequestFrame;
-import io.kroxylicious.proxy.service.HostPort;
 
 import edu.umd.cs.findbugs.annotations.Nullable;
 
@@ -28,7 +22,6 @@ import static io.kroxylicious.proxy.internal.ProxyChannelState.Closed;
 import static io.kroxylicious.proxy.internal.ProxyChannelState.Connecting;
 import static io.kroxylicious.proxy.internal.ProxyChannelState.Forwarding;
 import static io.kroxylicious.proxy.internal.ProxyChannelState.HaProxy;
-import static io.kroxylicious.proxy.internal.ProxyChannelState.MultiClusterConnecting;
 import static io.kroxylicious.proxy.internal.ProxyChannelState.SelectingServer;
 import static io.kroxylicious.proxy.internal.ProxyChannelState.Startup;
 
@@ -41,8 +34,7 @@ sealed interface ProxyChannelState permits
         HaProxy,
         ApiVersions,
         SelectingServer,
-        Connecting,
-        MultiClusterConnecting,
+        Connecting, // connecting to one/many service endpoints
         Forwarding,
         Closed {
 
@@ -174,9 +166,8 @@ sealed interface ProxyChannelState permits
          * Transition to {@link Connecting}
          * @return The Connecting state
          */
-        public Connecting toConnecting(HostPort remote, Optional<SslContext> remoteSslContext) {
-            return new Connecting(haProxyMessage, clientSoftwareName,
-                    clientSoftwareVersion, remote, remoteSslContext);
+        public Connecting toConnecting() {
+            return new Connecting(haProxyMessage, clientSoftwareName, clientSoftwareVersion);
         }
     }
 
@@ -186,21 +177,11 @@ sealed interface ProxyChannelState permits
      * @param haProxyMessage
      * @param clientSoftwareName
      * @param clientSoftwareVersion
-     * @param remote
      */
     record Connecting(@Nullable HAProxyMessage haProxyMessage,
                       @Nullable String clientSoftwareName,
-                      @Nullable String clientSoftwareVersion,
-                      HostPort remote,
-                      Optional<SslContext> remoteSslContext)
+                      @Nullable String clientSoftwareVersion)
             implements ProxyChannelState {
-
-        Connecting(@Nullable HAProxyMessage haProxyMessage,
-                   @Nullable String clientSoftwareName,
-                   @Nullable String clientSoftwareVersion,
-                   HostPort remote) {
-            this(haProxyMessage, clientSoftwareName, clientSoftwareVersion, remote, Optional.empty());
-        }
 
         /**
          * Transition to {@link Forwarding}
@@ -285,10 +266,6 @@ sealed interface ProxyChannelState permits
      * The final state, where there are no connections to either client or server
      */
     record Closed() implements ProxyChannelState {
-
-    }
-
-    record MultiClusterConnecting(Map<String, HostPort> pendingConnections, Set<String> connectedBackends) implements ProxyChannelState {
 
     }
 
