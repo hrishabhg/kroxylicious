@@ -5,20 +5,16 @@
  */
 package io.kroxylicious.proxy.internal.router;
 
-import java.util.List;
-
 import org.apache.kafka.common.protocol.ApiKeys;
 import org.apache.kafka.common.protocol.ApiMessage;
 
 import io.kroxylicious.proxy.config.TargetCluster;
-import io.kroxylicious.proxy.internal.net.EndpointBinding;
 import io.kroxylicious.proxy.internal.net.EndpointGateway;
 import io.kroxylicious.proxy.internal.router.aggregator.ApiMessageAggregator;
 import io.kroxylicious.proxy.internal.net.BootstrapEndpointBinding;
 import io.kroxylicious.proxy.internal.net.BrokerEndpointBinding;
 import io.kroxylicious.proxy.internal.net.MetadataDiscoveryBrokerEndpointBinding;
 import io.kroxylicious.proxy.service.HostPort;
-import io.kroxylicious.proxy.service.ServiceEndpoint;
 
 import edu.umd.cs.findbugs.annotations.Nullable;
 
@@ -47,7 +43,7 @@ public interface Router {
      */
     BrokerEndpointBinding brokerEndpointBinding(EndpointGateway endpointGateway, int nodeId, HostPort hostPort, TargetCluster targetCluster);
 
-    MetadataDiscoveryBrokerEndpointBinding metadataDiscoveryBrokerEndpointBinding(EndpointGateway endpointGateway, int nodeId);
+    MetadataDiscoveryBrokerEndpointBinding metadataDiscoveryBrokerEndpointBinding(EndpointGateway endpointGateway, int nodeId, TargetCluster targetCluster);
 
     /**
      * Get response aggregator factory for an ApiKey.

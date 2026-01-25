@@ -10,7 +10,6 @@ import java.util.List;
 
 import org.apache.kafka.common.protocol.ApiKeys;
 
-import io.kroxylicious.proxy.filter.FilterContext;
 import io.kroxylicious.proxy.service.ServiceEndpoint;
 
 import edu.umd.cs.findbugs.annotations.Nullable;
@@ -50,5 +49,8 @@ public interface EndpointBinding {
      * @return node id or null.
      */
     @Nullable
-    Integer nodeId();
+    Integer upstreamNodeId();
+
+    @Nullable
+    Integer virtualNodeId();
 }

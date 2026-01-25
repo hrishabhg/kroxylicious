@@ -395,14 +395,14 @@ public class EndpointRegistry implements EndpointReconciler, EndpointBindingReso
                                     .map(NodeSpecificEndpointBinding.class::cast).toList();
                             nodeSpecificBindings.forEach(creations::remove);
                             return allOfStage(nodeSpecificBindings.stream()
-                                    .filter(eb -> !allBrokerIds.contains(eb.nodeId()))
+                                    .filter(eb -> !allBrokerIds.contains(eb.upstreamNodeId()))
                                     .map(eb -> deregisterBinding(endpointGateway, eb::equals)));
                         })));
 
         // chain any binding registrations and organise for the reconciliations entry to complete
         deregs.thenCompose(u1 -> allOfStage(creations.stream()
                 .map(vcbb -> {
-                    var brokerAddress = endpointGateway.getBrokerAddress(vcbb.nodeId());
+                    var brokerAddress = endpointGateway.getBrokerAddress(vcbb.upstreamNodeId());
                     var endpoint = Endpoint.createEndpoint(bindingAddress, brokerAddress.port(), endpointGateway.isUseTls());
                     return registerBinding(endpoint, brokerAddress.host(), vcbb);
                 })))

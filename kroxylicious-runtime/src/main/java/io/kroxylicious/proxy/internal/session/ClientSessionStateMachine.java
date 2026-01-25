@@ -106,7 +106,7 @@ public class ClientSessionStateMachine {
     public ClientSessionStateMachine(String virtualClusterName, EndpointBinding endpointBinding) {
         this.virtualClusterName = virtualClusterName;
         this.endpointBinding = endpointBinding;
-        this.nodeId = endpointBinding.nodeId();
+        this.nodeId = endpointBinding.upstreamNodeId();
 
         this.clientToProxyConnectionCounter = Metrics.clientToProxyConnectionCounter(virtualClusterName, nodeId).withTags();
         this.clientToProxyErrorCounter = Metrics.clientToProxyErrorCounter(virtualClusterName, nodeId).withTags();

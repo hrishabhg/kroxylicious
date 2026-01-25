@@ -224,7 +224,7 @@ public class KafkaProxyInitializer extends ChannelInitializer<Channel> {
 
     private KafkaMessageListener buildMetricsMessageListenerForDecode(EndpointBinding binding, VirtualClusterModel virtualCluster) {
         var clusterName = virtualCluster.getClusterName();
-        var nodeId = binding.nodeId();
+        var nodeId = binding.upstreamNodeId();
         var clientToProxyMessageCounterProvider = Metrics.clientToProxyMessageCounterProvider(clusterName, nodeId);
         var clientToProxyMessageSizeDistributionProvider = Metrics.clientToProxyMessageSizeDistributionProvider(clusterName, nodeId);
 
@@ -233,7 +233,7 @@ public class KafkaProxyInitializer extends ChannelInitializer<Channel> {
 
     private static MetricEmittingKafkaMessageListener buildMetricsMessageListenerForEncode(EndpointBinding binding, VirtualClusterModel virtualCluster) {
         var clusterName = virtualCluster.getClusterName();
-        var nodeId = binding.nodeId();
+        var nodeId = binding.upstreamNodeId();
         var proxyToClientMessageCounterProvider = Metrics.proxyToClientMessageCounterProvider(clusterName, nodeId);
         var proxyToClientMessageSizeDistributionProvider = Metrics.proxyToClientMessageSizeDistributionProvider(clusterName, nodeId);
         return new MetricEmittingKafkaMessageListener(proxyToClientMessageCounterProvider,

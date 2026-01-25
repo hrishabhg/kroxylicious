@@ -516,7 +516,7 @@ public class ProxyChannelStateMachine {
             LOGGER.debug("{}: All responses received for correlationId {}. Forwarding to session.",
                     sessionId, frame.correlationId());
 
-            ApiMessageAggregator<?> aggregator = router.aggregator(frame.apiKey());
+            ApiMessageAggregator<?> aggregator = router().aggregator(frame.apiKey());
             if (aggregator != null) {
                 ApiMessage aggregatedResponse = aggregator.aggregateResponses(aggContext);
                 var aggregatedMsg = new DecodedResponseFrame<>(

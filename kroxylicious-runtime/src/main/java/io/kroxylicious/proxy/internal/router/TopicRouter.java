@@ -105,8 +105,14 @@ public class TopicRouter implements Router {
 
             @Nullable
             @Override
-            public Integer nodeId() {
-                return 0;
+            public Integer upstreamNodeId() {
+                return null;
+            }
+
+            @Nullable
+            @Override
+            public Integer virtualNodeId() {
+                return null;
             }
         };
     }
@@ -167,7 +173,13 @@ public class TopicRouter implements Router {
 
             @NonNull
             @Override
-            public Integer nodeId() {
+            public Integer upstreamNodeId() {
+                return nodeId;
+            }
+
+            @Nullable
+            @Override
+            public Integer virtualNodeId() {
                 return nodeId + targetCluster.index() * NODE_ID_OFFSET;
             }
 
@@ -197,7 +209,7 @@ public class TopicRouter implements Router {
     }
 
     @Override
-    public MetadataDiscoveryBrokerEndpointBinding metadataDiscoveryBrokerEndpointBinding(EndpointGateway endpointGateway, int nodeId) {
+    public MetadataDiscoveryBrokerEndpointBinding metadataDiscoveryBrokerEndpointBinding(EndpointGateway endpointGateway, int nodeId, TargetCluster targetCluster) {
         return new MetadataDiscoveryBrokerEndpointBinding() {
             @NonNull
             @Override
@@ -221,8 +233,15 @@ public class TopicRouter implements Router {
 
             @Nullable
             @Override
-            public Integer nodeId() {
+            public Integer upstreamNodeId() {
                 return nodeId;
+            }
+
+            @Nullable
+            @Override
+            public Integer virtualNodeId() {
+                // todo: refactor to avoid duplication with BrokerEndpointBinding
+                return nodeId + targetCluster.index() * NODE_ID_OFFSET;
             }
         };
     }
