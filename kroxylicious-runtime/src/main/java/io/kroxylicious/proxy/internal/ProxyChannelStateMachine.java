@@ -148,8 +148,6 @@ public class ProxyChannelStateMachine {
     // Filters applied to this session
     private @Nullable List<FilterAndInvoker> filters;
 
-    private final Router router;
-
     // Connection state
     private volatile boolean anyConnected = false;
 
@@ -164,7 +162,6 @@ public class ProxyChannelStateMachine {
         this.logNetwork = logNetwork;
         this.logFrames = logFrames;
         this.binding = binding;
-        this.router = new TopicRouter();
     }
 
     ProxyChannelState state() {
@@ -209,6 +206,10 @@ public class ProxyChannelStateMachine {
 
     public String currentState() {
         return this.state().getClass().getSimpleName();
+    }
+
+    public Router router() {
+        return this.binding.endpointGateway().virtualCluster().router();
     }
 
     // ==================== Connection Initiation (Orchestration Entry Points) ====================

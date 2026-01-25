@@ -35,7 +35,7 @@ import edu.umd.cs.findbugs.annotations.Nullable;
  */
 public interface Router {
 
-    EndpointBinding bootstrapEndpointBinding(EndpointGateway endpointGateway);
+    BootstrapEndpointBinding bootstrapEndpointBinding(EndpointGateway endpointGateway);
 
     /**
      * Get broker endpoint binding for given nodeId and target cluster.
@@ -45,9 +45,9 @@ public interface Router {
      * @param targetCluster associated target cluster
      * @return broker endpoint binding
      */
-    EndpointBinding brokerEndpointBinding(EndpointGateway endpointGateway, int nodeId, HostPort hostPort, TargetCluster targetCluster);
+    BrokerEndpointBinding brokerEndpointBinding(EndpointGateway endpointGateway, int nodeId, HostPort hostPort, TargetCluster targetCluster);
 
-    EndpointBinding metadataDiscoveryBrokerEndpointBinding(EndpointGateway endpointGateway, int nodeId);
+    MetadataDiscoveryBrokerEndpointBinding metadataDiscoveryBrokerEndpointBinding(EndpointGateway endpointGateway, int nodeId);
 
     /**
      * Get response aggregator factory for an ApiKey.

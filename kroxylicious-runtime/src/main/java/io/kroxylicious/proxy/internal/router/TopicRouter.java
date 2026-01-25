@@ -9,16 +9,16 @@ package io.kroxylicious.proxy.internal.router;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
 
 import org.apache.kafka.common.protocol.ApiKeys;
 import org.apache.kafka.common.protocol.ApiMessage;
 
 import io.kroxylicious.proxy.config.TargetCluster;
+import io.kroxylicious.proxy.internal.net.BootstrapEndpointBinding;
 import io.kroxylicious.proxy.internal.net.BrokerEndpointBinding;
-import io.kroxylicious.proxy.internal.net.EndpointBinding;
 import io.kroxylicious.proxy.internal.net.EndpointGateway;
+import io.kroxylicious.proxy.internal.net.MetadataDiscoveryBrokerEndpointBinding;
 import io.kroxylicious.proxy.internal.router.aggregator.ApiMessageAggregator;
 import io.kroxylicious.proxy.internal.router.aggregator.ApiVersionResponseAggregator;
 import io.kroxylicious.proxy.internal.router.aggregator.MetadataResponseAggregator;
@@ -42,26 +42,40 @@ public class TopicRouter implements Router {
         this.aggregators.put(ApiKeys.SASL_HANDSHAKE, new SaslHandshakeResponseAggregator());
         this.aggregators.put(ApiKeys.SASL_AUTHENTICATE, new SaslAuthenticateResponseAggregator());
         this.aggregators.put(ApiKeys.METADATA, new MetadataResponseAggregator());
+        // describeCluster could be added here in future if needed
+        // brokerAddressFilter
         this.virtualCluster = virtualCluster;
     }
 
-    private static final Map<String, TargetCluster> TopicRoutes = Map.of(
-            "alice", new TargetCluster("localhost:39092", Optional.empty()),
-            "bob", new TargetCluster("localhost:62496", Optional.empty()),
-            "default", new TargetCluster("localhost:39092", Optional.empty()));
-
     // list of APIs that are always topic-aware. Metadata is not always topic-aware.
-    private static Set<ApiKeys> TOPIC_AWARE_APIS = Set.of(
+    private static final Set<ApiKeys> TOPIC_AWARE_APIS = Set.of(
             ApiKeys.PRODUCE,
             ApiKeys.FETCH
     );
 
-    private static int NODE_ID_OFFSET = 10000;
+    // this call should go to any broker of first target cluster
+    private static final Set<ApiKeys> COORDINATOR_APIS = Set.of(
+            ApiKeys.FIND_COORDINATOR,
+            ApiKeys.INIT_PRODUCER_ID
+    );
+
+    private static final Set<ApiKeys> TXN_APIS = Set.of(
+            ApiKeys.TXN_OFFSET_COMMIT,
+            ApiKeys.ADD_PARTITIONS_TO_TXN,
+            ApiKeys.END_TXN,
+            ApiKeys.WRITE_TXN_MARKERS
+    );
+
+    private static final int NODE_ID_OFFSET = 10000;
+
+    public TargetCluster coordinatorTargetCluster() {
+        return virtualCluster.targetClusters().get(0);
+    }
 
     // todo: should I cache the EndpointBinding instances?
     @Override
-    public EndpointBinding bootstrapEndpointBinding(EndpointGateway endpointGateway) {
-        return new EndpointBinding() {
+    public BootstrapEndpointBinding bootstrapEndpointBinding(EndpointGateway endpointGateway) {
+        return new BootstrapEndpointBinding() {
             @NonNull
             @Override
             public EndpointGateway endpointGateway() {
@@ -71,8 +85,12 @@ public class TopicRouter implements Router {
             @NonNull
             @Override
             public List<ServiceEndpoint> upstreamServiceEndpoints(@NonNull ApiKeys apiKey) {
-                if (TOPIC_AWARE_APIS.contains(apiKey)) {
+                if (TOPIC_AWARE_APIS.contains(apiKey) || TXN_APIS.contains(apiKey)) {
                     throw new IllegalArgumentException("API key " + apiKey + " not supported for bootstrap endpoint binding");
+                }
+                if (COORDINATOR_APIS.contains(apiKey)) {
+                    TargetCluster t = coordinatorTargetCluster();
+                    return List.of(new ServiceEndpoint(t.bootstrapServer().host(), t.bootstrapServer().port(), t));
                 }
                 return allUpstreamServiceEndpoints();
             }
@@ -80,7 +98,7 @@ public class TopicRouter implements Router {
             @NonNull
             @Override
             public List<ServiceEndpoint> allUpstreamServiceEndpoints() {
-                return TopicRoutes.values().stream()
+                return virtualCluster.targetClusters().stream()
                         .map(t -> new ServiceEndpoint(t.bootstrapServer().host(), t.bootstrapServer().port(), t))
                         .toList();
             }
@@ -101,10 +119,12 @@ public class TopicRouter implements Router {
      * @return EndpointBinding representing the node specific binding
      */
     @Override
-    public EndpointBinding brokerEndpointBinding(EndpointGateway endpointGateway, int nodeId, HostPort hostPort, TargetCluster targetCluster) {
-        return new EndpointBinding() {
+    public BrokerEndpointBinding brokerEndpointBinding(EndpointGateway endpointGateway, int nodeId, HostPort hostPort, TargetCluster targetCluster) {
+        return new BrokerEndpointBinding() {
 
             private ServiceEndpoint topicAwareEndpoint;
+
+            private ServiceEndpoint coordinatorEndpoint;
 
             private List<ServiceEndpoint> allUpstreamServiceEndpoints;
 
@@ -116,7 +136,10 @@ public class TopicRouter implements Router {
 
             @NonNull
             @Override
-            public List<ServiceEndpoint> upstreamServiceEndpoints(ApiKeys apiKey) {
+            public List<ServiceEndpoint> upstreamServiceEndpoints(@NonNull ApiKeys apiKey) {
+                if (TXN_APIS.contains(apiKey)) {
+                    throw new IllegalArgumentException("API key " + apiKey + " not supported for broker endpoint binding");
+                }
                 ensureInitialized();
                 if (TOPIC_AWARE_APIS.contains(apiKey)) {
                     if (topicAwareEndpoint == null) {
@@ -124,6 +147,14 @@ public class TopicRouter implements Router {
                     }
                     return List.of(topicAwareEndpoint);
                 }
+
+                if (COORDINATOR_APIS.contains(apiKey)) {
+                    if (coordinatorEndpoint == null) {
+                        throw new IllegalStateException("Coordinator endpoint not initialised for nodeId " + nodeId);
+                    }
+                    return List.of(coordinatorEndpoint);
+                }
+
                 return allUpstreamServiceEndpoints();
             }
 
@@ -134,7 +165,7 @@ public class TopicRouter implements Router {
                 return allUpstreamServiceEndpoints;
             }
 
-            @Nullable
+            @NonNull
             @Override
             public Integer nodeId() {
                 return nodeId + targetCluster.index() * NODE_ID_OFFSET;
@@ -144,13 +175,20 @@ public class TopicRouter implements Router {
                 if (allUpstreamServiceEndpoints == null) {
                     allUpstreamServiceEndpoints = virtualCluster.targetClusters().stream().map(
                             t -> {
+                                ServiceEndpoint endpoint;
                                 if (t.equals(targetCluster)) {
-                                    topicAwareEndpoint = new ServiceEndpoint(t.bootstrapServer().host(), t.bootstrapServer().port(), t);
-                                    return topicAwareEndpoint;
+                                    endpoint = new ServiceEndpoint(hostPort.host(), hostPort.port(), t);
+                                    topicAwareEndpoint = endpoint;
                                 }
                                 else {
-                                    return new ServiceEndpoint(t.bootstrapServer().host(), t.bootstrapServer().port(), t);
+                                    endpoint = new ServiceEndpoint(t.bootstrapServer().host(), t.bootstrapServer().port(), t);
                                 }
+
+                                if (coordinatorEndpoint == null && t.equals(coordinatorTargetCluster())) {
+                                    coordinatorEndpoint = endpoint;
+                                }
+
+                                return endpoint;
                             }
                     ).toList();
                 }
@@ -159,8 +197,8 @@ public class TopicRouter implements Router {
     }
 
     @Override
-    public EndpointBinding metadataDiscoveryBrokerEndpointBinding(EndpointGateway endpointGateway, int nodeId) {
-        return new EndpointBinding() {
+    public MetadataDiscoveryBrokerEndpointBinding metadataDiscoveryBrokerEndpointBinding(EndpointGateway endpointGateway, int nodeId) {
+        return new MetadataDiscoveryBrokerEndpointBinding() {
             @NonNull
             @Override
             public EndpointGateway endpointGateway() {
@@ -176,7 +214,7 @@ public class TopicRouter implements Router {
             @NonNull
             @Override
             public List<ServiceEndpoint> allUpstreamServiceEndpoints() {
-                return TopicRoutes.values().stream()
+                return virtualCluster.targetClusters().stream()
                         .map(t -> new ServiceEndpoint(t.bootstrapServer().host(), t.bootstrapServer().port(), t))
                         .toList();
             }
@@ -185,11 +223,6 @@ public class TopicRouter implements Router {
             @Override
             public Integer nodeId() {
                 return nodeId;
-            }
-
-            @Override
-            public boolean restrictUpstreamToMetadataDiscovery() {
-                return true;
             }
         };
     }

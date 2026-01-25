@@ -113,7 +113,7 @@ public class VirtualClusterModel {
         // TODO: https://github.com/kroxylicious/kroxylicious/issues/104 be prepared to reload the SslContext at runtime.
         // this.upstreamSslContext = buildUpstreamSslContext();
 
-        this.router = new TopicRouter();
+        this.router = new TopicRouter(this);
     }
 
     public void logVirtualClusterSummary() {
