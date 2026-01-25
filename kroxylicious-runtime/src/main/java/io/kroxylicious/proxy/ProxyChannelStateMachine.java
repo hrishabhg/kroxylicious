@@ -3,7 +3,7 @@
  *
  * Licensed under the Apache Software License version 2.0, available at http://www.apache.org/licenses/LICENSE-2.0
  */
-package io.kroxylicious.proxy.internal.session;
+package io.kroxylicious.proxy;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -34,6 +34,7 @@ import io.kroxylicious.proxy.internal.router.AggregationContext;
 import io.kroxylicious.proxy.internal.router.Router;
 import io.kroxylicious.proxy.internal.router.TopicRouter;
 import io.kroxylicious.proxy.internal.router.aggregator.ApiMessageAggregator;
+import io.kroxylicious.proxy.internal.session.BackendStateMachine;
 import io.kroxylicious.proxy.internal.util.Metrics;
 import io.kroxylicious.proxy.service.ServiceEndpoint;
 

@@ -35,7 +35,7 @@
  *   <dt>{@link io.kroxylicious.proxy.internal.session.BackendStateMachine}</dt>
  *   <dd>Manages individual cluster connection lifecycle</dd>
  *
- *   <dt>{@link io.kroxylicious.proxy.internal.session.ProxyChannelStateMachine}</dt>
+ *   <dt>{@link io.kroxylicious.proxy.ProxyChannelStateMachine}</dt>
  *   <dd>Aggregates multiple BackendStateMachines, provides routing and backpressure coordination</dd>
  * </dl>
  *
@@ -60,7 +60,7 @@
  * </table>
  *
  * @see io.kroxylicious.proxy.internal.session.ClientSessionStateMachine
- * @see io.kroxylicious.proxy.internal.session.ProxyChannelStateMachine
+ * @see io.kroxylicious.proxy.ProxyChannelStateMachine
  * @see io.kroxylicious.proxy.internal.session.BackendStateMachine
  */
 @ReturnValuesAreNonnullByDefault

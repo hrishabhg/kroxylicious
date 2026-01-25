@@ -53,7 +53,7 @@ import io.kroxylicious.proxy.internal.filter.NettyFilterContext;
 import io.kroxylicious.proxy.internal.net.EndpointBinding;
 import io.kroxylicious.proxy.internal.net.EndpointReconciler;
 import io.kroxylicious.proxy.internal.session.ClientSessionStateMachine;
-import io.kroxylicious.proxy.internal.session.ProxyChannelStateMachine;
+import io.kroxylicious.proxy.ProxyChannelStateMachine;
 import io.kroxylicious.proxy.model.VirtualClusterModel;
 import io.kroxylicious.proxy.service.HostPort;
 import io.kroxylicious.proxy.service.ServiceEndpoint;
