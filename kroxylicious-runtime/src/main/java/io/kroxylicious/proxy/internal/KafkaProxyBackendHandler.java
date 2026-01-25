@@ -20,7 +20,6 @@ import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslHandshakeCompletionEvent;
 
 import io.kroxylicious.proxy.internal.session.BackendStateMachine;
-import io.kroxylicious.proxy.ProxyChannelStateMachine;
 import io.kroxylicious.proxy.tag.VisibleForTesting;
 
 import edu.umd.cs.findbugs.annotations.Nullable;
