@@ -109,9 +109,7 @@ public class ProxyChannelStateMachine {
                                     int socketFrameMaxSizeBytes,
                                     boolean logNetwork,
                                     boolean logFrames) {
-        this.sessionId = Objects.requireNonNull(sessionId);
         this.virtualClusterName = Objects.requireNonNull(virtualClusterName);
-        this.sessionStateMachine = Objects.requireNonNull(sessionStateMachine);
         this.socketFrameMaxSizeBytes = socketFrameMaxSizeBytes;
         this.logNetwork = logNetwork;
         this.logFrames = logFrames;
