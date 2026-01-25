@@ -46,6 +46,8 @@ import io.kroxylicious.proxy.config.tls.TrustOptions;
 import io.kroxylicious.proxy.config.tls.TrustProvider;
 import io.kroxylicious.proxy.internal.filter.TopicNameCacheFilter;
 import io.kroxylicious.proxy.internal.net.EndpointGateway;
+import io.kroxylicious.proxy.internal.router.Router;
+import io.kroxylicious.proxy.internal.router.TopicRouter;
 import io.kroxylicious.proxy.internal.subject.DefaultTransportSubjectBuilderService;
 import io.kroxylicious.proxy.internal.util.StableKroxyliciousLinkGenerator;
 import io.kroxylicious.proxy.plugin.PluginConfigurationException;
@@ -55,6 +57,9 @@ import io.kroxylicious.proxy.tag.VisibleForTesting;
 
 import edu.umd.cs.findbugs.annotations.Nullable;
 
+/**
+ * VirtualClusterModel represents the runtime model of a virtual cluster as configured.
+ */
 @SuppressWarnings("OptionalUsedAsFieldOrParameterType")
 public class VirtualClusterModel {
 
@@ -70,6 +75,8 @@ public class VirtualClusterModel {
     private final boolean logFrames;
 
     private final Map<String, VirtualClusterGatewayModel> gateways = new HashMap<>();
+
+    private final Router router;
 
     private final List<NamedFilterDefinition> filters;
 
@@ -105,6 +112,8 @@ public class VirtualClusterModel {
 
         // TODO: https://github.com/kroxylicious/kroxylicious/issues/104 be prepared to reload the SslContext at runtime.
         // this.upstreamSslContext = buildUpstreamSslContext();
+
+        this.router = new TopicRouter();
     }
 
     public void logVirtualClusterSummary() {
@@ -309,6 +318,10 @@ public class VirtualClusterModel {
 
     public Map<String, EndpointGateway> gateways() {
         return Collections.unmodifiableMap(gateways);
+    }
+
+    public Router router() {
+        return router;
     }
 
     public TransportSubjectBuilder subjectBuilder(PluginFactoryRegistry pfr) {

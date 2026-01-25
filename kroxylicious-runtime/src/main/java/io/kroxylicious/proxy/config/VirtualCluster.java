@@ -31,6 +31,7 @@ import edu.umd.cs.findbugs.annotations.Nullable;
 public record VirtualCluster(@JsonProperty(required = true) String name,
                              @JsonProperty(required = true) List<TargetCluster> targetClusters,
                              @JsonProperty(required = true) List<VirtualClusterGateway> gateways,
+                             @Nullable RouterDefinition router,
                              boolean logNetwork,
                              boolean logFrames,
                              @Nullable List<String> filters,
@@ -72,7 +73,7 @@ public record VirtualCluster(@JsonProperty(required = true) String name,
                           boolean logNetwork,
                           boolean logFrames,
                           @Nullable List<String> filters) {
-        this(name, targetClusters, gateways, logNetwork, logFrames, filters, null, null);
+        this(name, targetClusters, gateways, null, logNetwork, logFrames, filters, null, null);
     }
 
     boolean isDnsLabel(String name) {

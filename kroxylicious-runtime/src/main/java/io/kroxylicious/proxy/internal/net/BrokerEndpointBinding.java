@@ -11,7 +11,6 @@ import java.util.Objects;
 
 import org.apache.kafka.common.protocol.ApiKeys;
 
-import io.kroxylicious.proxy.filter.FilterContext;
 import io.kroxylicious.proxy.service.ServiceEndpoint;
 
 /**

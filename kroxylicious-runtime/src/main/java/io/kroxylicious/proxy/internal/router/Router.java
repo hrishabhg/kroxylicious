@@ -5,13 +5,20 @@
  */
 package io.kroxylicious.proxy.internal.router;
 
+import java.util.List;
+
 import org.apache.kafka.common.protocol.ApiKeys;
 import org.apache.kafka.common.protocol.ApiMessage;
 
+import io.kroxylicious.proxy.config.TargetCluster;
+import io.kroxylicious.proxy.internal.net.EndpointBinding;
+import io.kroxylicious.proxy.internal.net.EndpointGateway;
 import io.kroxylicious.proxy.internal.router.aggregator.ApiMessageAggregator;
 import io.kroxylicious.proxy.internal.net.BootstrapEndpointBinding;
 import io.kroxylicious.proxy.internal.net.BrokerEndpointBinding;
 import io.kroxylicious.proxy.internal.net.MetadataDiscoveryBrokerEndpointBinding;
+import io.kroxylicious.proxy.service.HostPort;
+import io.kroxylicious.proxy.service.ServiceEndpoint;
 
 import edu.umd.cs.findbugs.annotations.Nullable;
 
@@ -28,11 +35,19 @@ import edu.umd.cs.findbugs.annotations.Nullable;
  */
 public interface Router {
 
-    BootstrapEndpointBinding createBootstrapBinding();
+    EndpointBinding bootstrapEndpointBinding(EndpointGateway endpointGateway);
 
-    BrokerEndpointBinding createBrokerBinding();
+    /**
+     * Get broker endpoint binding for given nodeId and target cluster.
+     * @param endpointGateway gateway
+     * @param nodeId nodeId in the target cluster
+     * @param hostPort hostPort of the broker
+     * @param targetCluster associated target cluster
+     * @return broker endpoint binding
+     */
+    EndpointBinding brokerEndpointBinding(EndpointGateway endpointGateway, int nodeId, HostPort hostPort, TargetCluster targetCluster);
 
-    MetadataDiscoveryBrokerEndpointBinding createMetadataDiscoveryBinding();
+    EndpointBinding metadataDiscoveryBrokerEndpointBinding(EndpointGateway endpointGateway, int nodeId);
 
     /**
      * Get response aggregator factory for an ApiKey.

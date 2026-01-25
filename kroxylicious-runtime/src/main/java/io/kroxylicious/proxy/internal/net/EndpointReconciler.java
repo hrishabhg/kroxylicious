@@ -6,11 +6,11 @@
 
 package io.kroxylicious.proxy.internal.net;
 
-import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletionStage;
 
-import io.kroxylicious.proxy.service.ServiceEndpoint;
+import io.kroxylicious.proxy.config.TargetCluster;
+import io.kroxylicious.proxy.service.HostPort;
 
 public interface EndpointReconciler {
 
@@ -23,5 +23,5 @@ public interface EndpointReconciler {
      * @param upstreamNodes  current set of node ids
      * @return CompletionStage that is used to signal completion of the work.
      */
-    CompletionStage<Void> reconcile(EndpointGateway virtualClusterModel, Map<Integer, List<ServiceEndpoint>> upstreamNodes);
+    CompletionStage<Void> reconcile(EndpointGateway virtualClusterModel, Map<Integer, HostPort> upstreamNodes, TargetCluster targetCluster);
 }

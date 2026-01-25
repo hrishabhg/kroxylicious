@@ -12,9 +12,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import org.apache.kafka.common.protocol.ApiKeys;
 import org.apache.kafka.common.protocol.ApiMessage;
@@ -34,8 +36,10 @@ import io.kroxylicious.proxy.internal.router.Router;
 import io.kroxylicious.proxy.internal.router.TopicRouter;
 import io.kroxylicious.proxy.internal.router.aggregator.ApiMessageAggregator;
 import io.kroxylicious.proxy.internal.session.BackendStateMachine;
+import io.kroxylicious.proxy.internal.util.ActivationToken;
 import io.kroxylicious.proxy.internal.util.Metrics;
 import io.kroxylicious.proxy.service.ServiceEndpoint;
+import io.kroxylicious.proxy.tag.VisibleForTesting;
 
 import edu.umd.cs.findbugs.annotations.Nullable;
 
@@ -74,12 +78,53 @@ public class ProxyChannelStateMachine {
     private static final String DUPLICATE_INITIATE_CONNECT_ERROR = "onInitiateConnect called more than once";
     private static final Logger LOGGER = LoggerFactory.getLogger(ProxyChannelStateMachine.class);
 
-    private final String sessionId;
-    private final String virtualClusterName;
-    private final KafkaProxyFrontendHandler frontendHandler;
-    private final int socketFrameMaxSizeBytes;
-    private final boolean logNetwork;
-    private final boolean logFrames;
+    // Connection metrics
+    private final Counter clientToProxyErrorCounter;
+    private final Counter clientToProxyConnectionCounter;
+    private final Counter proxyToServerConnectionCounter;
+    private final Counter proxyToServerErrorCounter;
+    private final Timer serverToProxyBackpressureMeter;
+    private final Timer clientToProxyBackPressureMeter;
+
+    private final ActivationToken clientToProxyConnectionToken;
+    private final ActivationToken proxyToServerConnectionToken;
+
+    @VisibleForTesting
+    @Nullable
+    Timer.Sample clientToProxyBackpressureTimer;
+
+    @VisibleForTesting
+    @Nullable
+    Timer.Sample serverBackpressureTimer;
+
+    @Nullable
+    private String sessionId;
+
+    /**
+     * The current state. This can be changed via a call to one of the {@code on*()} methods.
+     */
+    private ProxyChannelState state = ProxyChannelState.Startup.STARTING_STATE;
+
+    /*
+     * The netty autoread flag is volatile =>
+     * expensive to set in every call to channelRead.
+     * So we track autoread states via these non-volatile fields,
+     * allowing us to only touch the volatile when it needs to be changed
+     */
+    @VisibleForTesting
+    boolean backendsReadsBlocked;
+
+    // per-backend read blocked states
+    private final Map<ServiceEndpoint, Boolean> backendReadsBlocked = new ConcurrentHashMap<>();
+
+    @VisibleForTesting
+    boolean clientReadsBlocked;
+
+    /**
+     * The frontend handler. Non-null if we got as far as ClientActive.
+     */
+    @SuppressWarnings({ "java:S2637" })
+    private @Nullable KafkaProxyFrontendHandler frontendHandler = null;
 
     // Cluster backends
     private final Map<ServiceEndpoint, BackendStateMachine> backends = new ConcurrentHashMap<>();
@@ -90,8 +135,13 @@ public class ProxyChannelStateMachine {
     // Correlation counter for aggregating responses
     private final Map<Integer, AggregationContext<?>> aggregationCorrelationManager = new ConcurrentHashMap<>();
 
+    private final String virtualClusterName;
+    private final int socketFrameMaxSizeBytes;
+    private final boolean logNetwork;
+    private final boolean logFrames;
+
     private volatile ServiceEndpoint defaultTarget;
-    private final EndpointBinding endpointBinding;
+    private final EndpointBinding binding;
 
     private @Nullable Channel inboundChannel;
 
@@ -105,7 +155,7 @@ public class ProxyChannelStateMachine {
 
     public ProxyChannelStateMachine(
                                     String virtualClusterName,
-                                    EndpointBinding endpointBinding,
+                                    EndpointBinding binding,
                                     int socketFrameMaxSizeBytes,
                                     boolean logNetwork,
                                     boolean logFrames) {
@@ -113,8 +163,52 @@ public class ProxyChannelStateMachine {
         this.socketFrameMaxSizeBytes = socketFrameMaxSizeBytes;
         this.logNetwork = logNetwork;
         this.logFrames = logFrames;
-        this.endpointBinding = endpointBinding;
+        this.binding = binding;
         this.router = new TopicRouter();
+    }
+
+    ProxyChannelState state() {
+        return state;
+    }
+
+    @VisibleForTesting
+    void allocateSessionId() {
+        this.sessionId = UUID.randomUUID().toString();
+    }
+
+    int connectedBackendCount() {
+        return (int) backends.values().stream().filter(BackendStateMachine::isConnected).count();
+    }
+
+    /**
+     * Purely for tests DO NOT USE IN PRODUCTION code!!
+     * Sonar will complain if one uses this in prod code listen to it.
+     */
+    @VisibleForTesting
+    void forceState(ProxyChannelState state, KafkaProxyFrontendHandler frontendHandler, @Nullable Map<ServiceEndpoint, BackendStateMachine> backends) {
+        LOGGER.info("Forcing state to {} with {} and {}", state, frontendHandler, backends);
+        this.state = state;
+        this.frontendHandler = frontendHandler;
+        this.backends.clear();
+        if (backends != null) {
+            this.backends.putAll(backends);
+        }
+    }
+
+    @Override
+    public String toString() {
+        return "ProxyChannelStateMachine{" +
+                "state=" + state +
+                ", clientReadsBlocked=" + clientReadsBlocked +
+                ", backendsReadsBlocked=" + backendsReadsBlocked +
+                ", sessionId='" + sessionId + '\'' +
+                ", clusters=" + backends.keySet() +
+                ", connectedBackends=" + connectedBackendCount() +
+                '}';
+    }
+
+    public String currentState() {
+        return this.state().getClass().getSimpleName();
     }
 
     // ==================== Connection Initiation (Orchestration Entry Points) ====================
@@ -125,18 +219,17 @@ public class ProxyChannelStateMachine {
      * <p>This is the main entry point for multi-cluster connections,
      * called by NetFilter via ClientSessionStateMachine.</p>
      *
-     * @param serviceEndpoints map of clusterId to target cluster configuration
      * @param filters protocol filters to apply
      * @param inboundChannel client channel
      * @return future that completes when ALL clusters are connected
      */
     public CompletableFuture<Void> initiateMultiClusterConnection(
-                                                                  List<ServiceEndpoint> serviceEndpoints,
                                                                   List<FilterAndInvoker> filters,
                                                                   Channel inboundChannel) {
 
         this.filters = filters;
         this.inboundChannel = inboundChannel;
+        var serviceEndpoints = binding.allUpstreamServiceEndpoints();
 
         LOGGER.info("{}: Initiating multi-cluster connection to {} clusters with {} filters",
                 sessionId, serviceEndpoints.size(), filters.size());
@@ -162,9 +255,8 @@ public class ProxyChannelStateMachine {
      * Register a cluster with explicit node ID offset.
      *
      * @param serviceEndpoint service endpoint for this cluster
-     * @return the created backend state machine
      */
-    public BackendStateMachine addServiceEndpoint(ServiceEndpoint serviceEndpoint) {
+    public void addServiceEndpoint(ServiceEndpoint serviceEndpoint) {
         if (backends.containsKey(serviceEndpoint)) {
             throw new IllegalArgumentException("Cluster already registered: " + serviceEndpoint.getHostPort());
         }
@@ -190,8 +282,6 @@ public class ProxyChannelStateMachine {
 
         backends.put(serviceEndpoint, backend);
         serviceEndpoints.put(serviceEndpoint.targetCluster().name(), serviceEndpoint);
-
-        return backend;
     }
 
     // ==================== Accessors ====================
@@ -211,7 +301,12 @@ public class ProxyChannelStateMachine {
     @Nullable
     public BackendStateMachine getBackend(String clusterId) {
         ServiceEndpoint serviceEndpoint = serviceEndpoints.get(clusterId);
-        return backends.get(serviceEndpoint);
+        return getBackend(serviceEndpoint);
+    }
+
+    @Nullable
+    public BackendStateMachine getBackend(ServiceEndpoint endpoint) {
+        return backends.getOrDefault(endpoint, null);
     }
 
     public boolean isMultiCluster() {
@@ -223,7 +318,19 @@ public class ProxyChannelStateMachine {
     }
 
     public boolean areAllConnected() {
-        return backends.values().stream().allMatch(BackendStateMachine::isConnected);
+        // no null value or not connected value means not all connected
+
+        if (backends.isEmpty()) {
+            return false;
+        }
+
+        var addedBackends = backends.values().stream().filter(Objects::nonNull);
+
+        if (addedBackends.count() != backends.size()) {
+            return false;
+        }
+
+        return addedBackends.allMatch(BackendStateMachine::isConnected);
     }
 
     /**
@@ -262,19 +369,32 @@ public class ProxyChannelStateMachine {
     public void forwardToServer(Object msg) {
         List<ServiceEndpoint> msgTargets;
         if (msg instanceof Frame frame) {
-            msgTargets = endpointBinding.upstreamServiceEndpoints(ApiKeys.forId(frame.apiKeyId()));
+            msgTargets = binding.upstreamServiceEndpoints(ApiKeys.forId(frame.apiKeyId()));
             if (!aggregationCorrelationManager.containsKey(frame.correlationId())) {
                 aggregationCorrelationManager.put(frame.correlationId(), new AggregationContext<>(msgTargets.size()));
             }
         }
         else {
-            // todo: do we need to handle non-Frame messages here?
+            // todo: do we need to handle non-Frame messages here? should we introduce default endpoint in binding?
             throw new IllegalArgumentException("Invalid message type: " + msg.getClass());
         }
 
-        // todo: check all backends are connected. we can implement re-connect logic.
+        Stream<BackendStateMachine> msgBackends = msgTargets.stream()
+                .map(this::getBackend);
+        // if any backend is null, we have an unknown cluster
+        if (msgBackends.anyMatch(Objects::isNull)) {
+            throw new IllegalArgumentException("Unknown cluster for message: " + msg);
+        }
 
-        backends.values().forEach(backend -> {
+        // there may be fewer backends required for a message than total backends
+        boolean allConnected = msgBackends.allMatch(BackendStateMachine::isConnected);
+
+        if (!allConnected) {
+            // todo: should we wait for connections to complete instead?
+            throw new IllegalStateException("Not all backends connected for message: " + msg);
+        }
+
+        msgBackends.forEach(backend -> {
             if (backend == null) { // this should never happen
                 throw new IllegalArgumentException("Unknown cluster for message: " + msg);
             }
@@ -316,7 +436,7 @@ public class ProxyChannelStateMachine {
      * Flush pending writes on specific cluster.
      */
     public void flush(String clusterId) {
-        BackendStateMachine backend = backends.get(clusterId);
+        BackendStateMachine backend = getBackend(clusterId);
         if (backend != null && backend.isConnected()) {
             backend.flushToServer();
         }
@@ -442,15 +562,5 @@ public class ProxyChannelStateMachine {
         for (BackendStateMachine backend : backends.values()) {
             backend.close();
         }
-    }
-
-    @Override
-    public String toString() {
-        return "ProxyChannelStateMachine{" +
-                "sessionId='" + sessionId + '\'' +
-                ", clusters=" + backends.keySet() +
-                ", primaryClusterId='" + defaultTarget + '\'' +
-                ", anyConnected=" + anyConnected +
-                '}';
     }
 }

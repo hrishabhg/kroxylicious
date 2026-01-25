@@ -280,7 +280,7 @@ class ProxyChannelStateMachineTest {
     void shouldUnblockServerReads() {
         // Given
         stateMachineInForwarding();
-        proxyChannelStateMachine.serverReadsBlocked = true;
+        proxyChannelStateMachine.backendsReadsBlocked = true;
 
         // When
         proxyChannelStateMachine.onClientWritable();

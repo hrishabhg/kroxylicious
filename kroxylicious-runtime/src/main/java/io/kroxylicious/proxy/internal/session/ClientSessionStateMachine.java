@@ -88,7 +88,7 @@ public class ClientSessionStateMachine {
     private @Nullable KafkaProxyFrontendHandler frontendHandler;
 
     // Connection manager - created at session start, orchestrates backend connections
-    private ProxyChannelStateMachine connectionManager;
+    private ProxyChannelStateMachine proxyChannelStateMachine;
 
     // Virtual cluster configuration (set on first connection initiation)
     private @Nullable VirtualClusterModel virtualClusterModel;
@@ -129,7 +129,7 @@ public class ClientSessionStateMachine {
 
     @Nullable
     public ProxyChannelStateMachine connectionManager() {
-        return connectionManager;
+        return proxyChannelStateMachine;
     }
 
     public boolean isRouting() {
@@ -221,8 +221,8 @@ public class ClientSessionStateMachine {
      * Called when client read batch is complete.
      */
     public void onClientReadComplete() {
-        if (state instanceof ClientSessionState.Routing && connectionManager != null) {
-            connectionManager.flushAll();
+        if (state instanceof ClientSessionState.Routing && proxyChannelStateMachine != null) {
+            proxyChannelStateMachine.flushAll();
         }
     }
 
@@ -253,15 +253,15 @@ public class ClientSessionStateMachine {
         toRouting();
 
         // Notify frontend
-        frontendHandler.inMultiClusterConnecting(serviceEndpoints, filters, connectionManager);
+        frontendHandler.inMultiClusterConnecting(serviceEndpoints, filters, proxyChannelStateMachine);
     }
 
     /**
      * Ensure connection manager is created.
      */
     private void ensureConnectionManager(VirtualClusterModel virtualCluster) {
-        if (connectionManager == null) {
-            connectionManager = new ProxyChannelStateMachine(
+        if (proxyChannelStateMachine == null) {
+            proxyChannelStateMachine = new ProxyChannelStateMachine(
                     sessionId,
                     virtualClusterName,
                     this,
@@ -295,7 +295,7 @@ public class ClientSessionStateMachine {
         LOGGER.debug("{}: Backend {} closed", sessionId, backend.clusterId());
 
         // If all backends closed, close session
-        if (connectionManager != null && !connectionManager.isAnyConnected()) {
+        if (proxyChannelStateMachine != null && !proxyChannelStateMachine.isAnyConnected()) {
             toClosed(null);
         }
     }
@@ -319,11 +319,11 @@ public class ClientSessionStateMachine {
 
     void onBackendWritable(BackendStateMachine backend) {
         // Only relieve client backpressure when ALL connected backends are writable
-        if (connectionManager == null || !clientReadsBlocked) {
+        if (proxyChannelStateMachine == null || !clientReadsBlocked) {
             return;
         }
 
-        boolean allBackendsWritable = connectionManager.allBackends().stream()
+        boolean allBackendsWritable = proxyChannelStateMachine.allBackends().stream()
                 .filter(BackendStateMachine::isConnected)
                 .allMatch(BackendStateMachine::isChannelWritable);
 
@@ -352,8 +352,8 @@ public class ClientSessionStateMachine {
      * Client is slow, apply backpressure to backends.
      */
     public void onClientUnwritable() {
-        if (connectionManager != null) {
-            connectionManager.applyBackpressureToAll();
+        if (proxyChannelStateMachine != null) {
+            proxyChannelStateMachine.applyBackpressureToAll();
         }
     }
 
@@ -361,8 +361,8 @@ public class ClientSessionStateMachine {
      * Client caught up, relieve backend backpressure.
      */
     public void onClientWritable() {
-        if (connectionManager != null) {
-            connectionManager.relieveBackpressureFromAll();
+        if (proxyChannelStateMachine != null) {
+            proxyChannelStateMachine.relieveBackpressureFromAll();
         }
     }
 
@@ -431,8 +431,8 @@ public class ClientSessionStateMachine {
     }
 
     private void messageFromClient(Object msg) {
-        if (connectionManager != null && connectionManager.isAnyConnected()) {
-            connectionManager.forwardToServer(msg);
+        if (proxyChannelStateMachine != null && proxyChannelStateMachine.isAnyConnected()) {
+            proxyChannelStateMachine.forwardToServer(msg);
         }
         else {
             Objects.requireNonNull(frontendHandler).bufferMsg(msg);
@@ -474,8 +474,8 @@ public class ClientSessionStateMachine {
         setState(ClientSessionState.Closed.INSTANCE);
 
         // Close all backends
-        if (connectionManager != null) {
-            connectionManager.closeAll();
+        if (proxyChannelStateMachine != null) {
+            proxyChannelStateMachine.closeAll();
         }
 
         // Close frontend with error if present
@@ -518,7 +518,7 @@ public class ClientSessionStateMachine {
         return "ClientSessionStateMachine{" +
                 "sessionId='" + sessionId + '\'' +
                 ", state=" + currentStateName() +
-                ", clusters=" + (connectionManager != null ? connectionManager.clusterIds() : "[]") +
+                ", clusters=" + (proxyChannelStateMachine != null ? proxyChannelStateMachine.clusterIds() : "[]") +
                 ", clientReadsBlocked=" + clientReadsBlocked +
                 '}';
     }

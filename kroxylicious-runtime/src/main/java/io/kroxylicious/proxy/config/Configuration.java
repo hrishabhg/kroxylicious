@@ -129,7 +129,7 @@ public record Configuration(
                                                              List<NamedFilterDefinition> filterDefinitions) {
 
         VirtualClusterModel virtualClusterModel = new VirtualClusterModel(virtualCluster.name(),
-                virtualCluster.targetCluster(),
+                virtualCluster.targetClusters(),
                 virtualCluster.logNetwork(),
                 virtualCluster.logFrames(),
                 filterDefinitions,
