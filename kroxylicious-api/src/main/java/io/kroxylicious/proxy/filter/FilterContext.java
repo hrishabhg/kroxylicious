@@ -117,7 +117,6 @@ public interface FilterContext {
      * @return CompletionStage that will yield the response.
      * @see io.kroxylicious.proxy.filter Thread Safety
      */
-    @Deprecated(since = "0.X")
     <M extends ApiMessage> CompletionStage<M> sendRequest(RequestHeaderData header,
                                                           ApiMessage request);
 
@@ -265,4 +264,5 @@ public interface FilterContext {
      * @see #clientSaslAuthenticationSuccess(String, Subject)
      */
     Subject authenticatedSubject();
+
 }
