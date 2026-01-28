@@ -3,96 +3,92 @@
  *
  * Licensed under the Apache Software License version 2.0, available at http://www.apache.org/licenses/LICENSE-2.0
  */
-
 package io.kroxylicious.proxy.internal;
 
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
+import java.util.stream.Collectors;
 
 import org.apache.kafka.common.errors.ApiException;
 import org.apache.kafka.common.message.ApiVersionsRequestData;
 import org.apache.kafka.common.protocol.ApiKeys;
+import org.apache.kafka.common.protocol.ApiMessage;
 import org.apache.kafka.common.protocol.Errors;
 import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.Timer;
-import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.Channel;
 import io.netty.handler.codec.DecoderException;
 import io.netty.handler.codec.haproxy.HAProxyMessage;
 
 import io.kroxylicious.proxy.frame.DecodedRequestFrame;
+import io.kroxylicious.proxy.frame.DecodedResponseFrame;
+import io.kroxylicious.proxy.frame.Frame;
 import io.kroxylicious.proxy.frame.RequestFrame;
 import io.kroxylicious.proxy.internal.ProxyChannelState.Closed;
-import io.kroxylicious.proxy.internal.ProxyChannelState.Forwarding;
 import io.kroxylicious.proxy.internal.codec.FrameOversizedException;
+import io.kroxylicious.proxy.internal.net.EndpointBinding;
+import io.kroxylicious.proxy.internal.net.EndpointReconciler;
+import io.kroxylicious.proxy.internal.router.ResponseAggregationContext;
+import io.kroxylicious.proxy.internal.router.Router;
+import io.kroxylicious.proxy.internal.router.TopicRouter;
+import io.kroxylicious.proxy.internal.router.aggregator.ApiMessageAggregator;
 import io.kroxylicious.proxy.internal.util.ActivationToken;
 import io.kroxylicious.proxy.internal.util.Metrics;
 import io.kroxylicious.proxy.internal.util.StableKroxyliciousLinkGenerator;
 import io.kroxylicious.proxy.internal.util.VirtualClusterNode;
-import io.kroxylicious.proxy.model.VirtualClusterModel;
-import io.kroxylicious.proxy.service.HostPort;
+import io.kroxylicious.proxy.service.UpstreamEndpoint;
 import io.kroxylicious.proxy.tag.VisibleForTesting;
 
 import edu.umd.cs.findbugs.annotations.Nullable;
 
 import static io.kroxylicious.proxy.internal.ProxyChannelState.Startup.STARTING_STATE;
-import static org.slf4j.LoggerFactory.getLogger;
 
 /**
- * <p>The state machine for a single client's proxy session.
- * The "session state" is held in the {@link #state} field and is represented by an immutable
- * subclass of {@link ProxyChannelState} which contains state-specific data.
- * Events which cause state transitions are represented by the {@code on*()} family of methods.
- * Depending on the transition the frontend or backend handlers may get notified via one if their
- * {@code in*()} methods.
- * </p>
+ * Manages multiple backend cluster connections for a single client session.
  *
+ * <p>This class serves as the orchestrator for backend connections, providing:</p>
+ * <ul>
+ *   <li>Connection initiation (single cluster or multi-cluster)</li>
+ *   <li>Cluster registration and lookup</li>
+ *   <li>Connection lifecycle management</li>
+ *   <li>Request forwarding and routing</li>
+ *   <li>Backpressure coordination across clusters</li>
+ *   <li>Response routing back to the client</li>
+ * </ul>
+ *
+ * <p>For single-cluster deployments, this manager contains exactly one backend.
+ * For multi-cluster, it contains one backend per configured cluster.</p>
+ *
+ * <h2>Architecture</h2>
  * <pre>
- *   «start»
- *      │
- *      ↓ frontend.{@link KafkaProxyFrontendHandler#channelActive(ChannelHandlerContext) channelActive}
- *     {@link ProxyChannelState.ClientActive ClientActive} ╌╌╌╌⤍ <b>error</b> ╌╌╌╌⤍
- *  ╭───┤
- *  ↓   ↓ frontend.{@link KafkaProxyFrontendHandler#channelRead(ChannelHandlerContext, Object) channelRead} receives a PROXY header
- *  │  {@link ProxyChannelState.HaProxy HaProxy} ╌╌╌╌⤍ <b>error</b> ╌╌╌╌⤍
- *  ╰───┤
- *      ↓ frontend.{@link KafkaProxyFrontendHandler#channelRead(ChannelHandlerContext, Object) channelRead} receives any other KRPC request
- *     {@link ProxyChannelState.SelectingServer SelectingServer} ╌╌╌╌⤍ <b>error</b> ╌╌╌╌⤍
- *     {@link ProxyChannelState.Connecting Connecting} ╌╌╌╌⤍ <b>error</b> ╌╌╌╌⤍
- *      │
- *      ↓
- *     {@link Forwarding Forwarding} ╌╌╌╌⤍ <b>error</b> ╌╌╌╌⤍
- *      │ backend.{@link KafkaProxyBackendHandler#channelInactive(ChannelHandlerContext) channelInactive}
- *      │ or frontend.{@link KafkaProxyFrontendHandler#channelInactive(ChannelHandlerContext) channelInactive}
- *      ↓
- *     {@link Closed Closed} ⇠╌╌╌╌ <b>error</b> ⇠╌╌╌╌
+ *   ClientSessionStateMachine
+ *           │
+ *           ▼
+ *   ProxyChannelStateMachine  ◀── NetFilter initiates connections here
+ *           │
+ *     ┌─────┼─────┐
+ *     ▼     ▼     ▼
+ *   BSM₁  BSM₂  BSM₃  (BackendStateMachines)
+ *     │     │     │
+ *     ▼     ▼     ▼
+ *   Cluster₁ Cluster₂ Cluster₃
  * </pre>
- *
- * <p>In addition to the "session state" this class also manages a second state machine for
- * handling TCP backpressure via the {@link #clientReadsBlocked} and {@link #serverReadsBlocked} field:</p>
- *
- * <pre>
- *     bothBlocked ←────────────────→ serverBlocked
- *         ↑                                ↑
- *         │                                │
- *         ↓                                ↓
- *    clientBlocked ←───────────────→ neitherBlocked
- * </pre>
- * <p>Note that this backpressure state machine is not tied to the
- * session state machine: in general backpressure could happen in
- * several of the session states and is independent of them.</p>
- *
- * <p>
- *     When either side of the proxy stats applying back pressure the proxy should propagate that fact to teh other peer.
- *     Thus when the proxy is notified that a peer is applying back pressure it results in action on the channel with the opposite peer.
- * </p>
  */
-@SuppressWarnings("java:S1133")
 public class ProxyChannelStateMachine {
     private static final String DUPLICATE_INITIATE_CONNECT_ERROR = "onInitiateConnect called more than once";
-    private static final Logger LOGGER = getLogger(ProxyChannelStateMachine.class);
+    private static final Logger LOGGER = LoggerFactory.getLogger(ProxyChannelStateMachine.class);
 
     // Connection metrics
     private final Counter clientToProxyErrorCounter;
@@ -116,20 +112,6 @@ public class ProxyChannelStateMachine {
     @Nullable
     private String sessionId;
 
-    @SuppressWarnings("java:S5738")
-    public ProxyChannelStateMachine(String clusterName, @Nullable Integer nodeId) {
-        VirtualClusterNode node = new VirtualClusterNode(clusterName, nodeId);
-        // Connection metrics
-        clientToProxyConnectionCounter = Metrics.clientToProxyConnectionCounter(clusterName, nodeId).withTags();
-        clientToProxyErrorCounter = Metrics.clientToProxyErrorCounter(clusterName, nodeId).withTags();
-        proxyToServerConnectionCounter = Metrics.proxyToServerConnectionCounter(clusterName, nodeId).withTags();
-        proxyToServerErrorCounter = Metrics.proxyToServerErrorCounter(clusterName, nodeId).withTags();
-        serverToProxyBackpressureMeter = Metrics.serverToProxyBackpressureTimer(clusterName, nodeId).withTags();
-        clientToProxyBackPressureMeter = Metrics.clientToProxyBackpressureTimer(clusterName, nodeId).withTags();
-        clientToProxyConnectionToken = Metrics.clientToProxyConnectionToken(node);
-        proxyToServerConnectionToken = Metrics.proxyToServerConnectionToken(node);
-    }
-
     /**
      * The current state. This can be changed via a call to one of the {@code on*()} methods.
      */
@@ -145,6 +127,7 @@ public class ProxyChannelStateMachine {
     boolean serverReadsBlocked;
     @VisibleForTesting
     boolean clientReadsBlocked;
+    private @Nullable Timer.Sample clientBackpressureTimer;
 
     /**
      * The frontend handler. Non-null if we got as far as ClientActive.
@@ -152,16 +135,62 @@ public class ProxyChannelStateMachine {
     @SuppressWarnings({ "java:S2637" })
     private @Nullable KafkaProxyFrontendHandler frontendHandler = null;
 
-    /**
-     * The backend handler. Non-null if {@link #onInitiateConnect(HostPort, VirtualClusterModel)}
-     * has been called
-     */
-    @VisibleForTesting
-    @Nullable
-    private KafkaProxyBackendHandler backendHandler;
+    // Cluster backends
+    private final Map<UpstreamEndpoint, BackendStateMachine> backends = new ConcurrentHashMap<>();
+
+    // Target clusters by cluster ID
+    private final Map<String, UpstreamEndpoint> serviceEndpoints = new ConcurrentHashMap<>();
+
+    // Correlation counter for aggregating responses
+    private final Map<Integer, ResponseAggregationContext<?>> aggregationCorrelationManager = new ConcurrentHashMap<>();
+
+    private final String virtualClusterName;
+    private final int socketFrameMaxSizeBytes;
+    private final boolean logNetwork;
+    private final boolean logFrames;
+
+    private volatile UpstreamEndpoint defaultTarget;
+    private final EndpointBinding binding;
+
+    private EndpointReconciler reconciler;
+
+    // Connection state
+    private volatile boolean anyConnected = false;
+
+    public ProxyChannelStateMachine(EndpointBinding binding, EndpointReconciler reconciler) {
+        var virtualCluster = binding.endpointGateway().virtualCluster();
+        this.virtualClusterName = Objects.requireNonNull(virtualCluster.getClusterName());
+        this.socketFrameMaxSizeBytes = virtualCluster.socketFrameMaxSizeBytes();
+        this.logNetwork = virtualCluster.isLogNetwork();
+        this.logFrames = virtualCluster.isLogFrames();
+        this.binding = binding;
+        this.reconciler = reconciler;
+
+        // Initialize metrics
+        Integer nodeId = binding.virtualNodeId();
+        VirtualClusterNode node = new VirtualClusterNode(virtualClusterName, nodeId);
+        // Connection metrics
+        clientToProxyConnectionCounter = Metrics.clientToProxyConnectionCounter(virtualClusterName, nodeId).withTags();
+        clientToProxyErrorCounter = Metrics.clientToProxyErrorCounter(virtualClusterName, nodeId).withTags();
+        proxyToServerConnectionCounter = Metrics.proxyToServerConnectionCounter(virtualClusterName, nodeId).withTags();
+        proxyToServerErrorCounter = Metrics.proxyToServerErrorCounter(virtualClusterName, nodeId).withTags();
+        serverToProxyBackpressureMeter = Metrics.serverToProxyBackpressureTimer(virtualClusterName, nodeId).withTags();
+        clientToProxyBackPressureMeter = Metrics.clientToProxyBackpressureTimer(virtualClusterName, nodeId).withTags();
+        clientToProxyConnectionToken = Metrics.clientToProxyConnectionToken(node);
+        proxyToServerConnectionToken = Metrics.proxyToServerConnectionToken(node);
+    }
 
     ProxyChannelState state() {
         return state;
+    }
+
+    @VisibleForTesting
+    void allocateSessionId() {
+        this.sessionId = UUID.randomUUID().toString();
+    }
+
+    int connectedBackendCount() {
+        return (int) backends.values().stream().filter(BackendStateMachine::isConnected).count();
     }
 
     /**
@@ -169,21 +198,25 @@ public class ProxyChannelStateMachine {
      * Sonar will complain if one uses this in prod code listen to it.
      */
     @VisibleForTesting
-    void forceState(ProxyChannelState state, KafkaProxyFrontendHandler frontendHandler, @Nullable KafkaProxyBackendHandler backendHandler) {
-        LOGGER.info("Forcing state to {} with {} and {}", state, frontendHandler, backendHandler);
+    void forceState(ProxyChannelState state, KafkaProxyFrontendHandler frontendHandler, @Nullable Map<UpstreamEndpoint, BackendStateMachine> backends) {
+        LOGGER.info("Forcing state to {} with {} and {}", state, frontendHandler, backends);
         this.state = state;
         this.frontendHandler = frontendHandler;
-        this.backendHandler = backendHandler;
+        this.backends.clear();
+        if (backends != null) {
+            this.backends.putAll(backends);
+        }
     }
 
     @Override
     public String toString() {
-        return "StateHolder{" +
+        return "ProxyChannelStateMachine{" +
                 "state=" + state +
-                ", serverReadsBlocked=" + serverReadsBlocked +
                 ", clientReadsBlocked=" + clientReadsBlocked +
-                ", frontendHandler=" + frontendHandler +
-                ", backendHandler=" + backendHandler +
+                ", serverReadsBlocked=" + serverReadsBlocked +
+                ", sessionId='" + sessionId + '\'' +
+                ", clusters=" + backends.keySet() +
+                ", connectedBackends=" + connectedBackendCount() +
                 '}';
     }
 
@@ -191,45 +224,10 @@ public class ProxyChannelStateMachine {
         return this.state().getClass().getSimpleName();
     }
 
-    /**
-     * Notify the state machine when the client applies back pressure.
-     */
-    public void onClientUnwritable() {
-        if (!serverReadsBlocked) {
-            serverReadsBlocked = true;
-            serverBackpressureTimer = Timer.start();
-            Objects.requireNonNull(backendHandler).applyBackpressure();
-        }
+    public Router router() {
+        return binding.endpointGateway().router();
     }
 
-    /**
-     * Notify the state machine when the client stops applying back pressure
-     */
-    public void onClientWritable() {
-        if (serverReadsBlocked) {
-            serverReadsBlocked = false;
-            if (serverBackpressureTimer != null) {
-                serverBackpressureTimer.stop(serverToProxyBackpressureMeter);
-                serverBackpressureTimer = null;
-            }
-            Objects.requireNonNull(backendHandler).relieveBackpressure();
-        }
-    }
-
-    /**
-     * Notify the state machine when the server applies back pressure
-     */
-    public void onServerUnwritable() {
-        if (!clientReadsBlocked) {
-            clientReadsBlocked = true;
-            clientToProxyBackpressureTimer = Timer.start();
-            Objects.requireNonNull(frontendHandler).applyBackpressure();
-        }
-    }
-
-    /**
-     * Notify the state machine when the server stops applying back pressure
-     */
     public void onServerWritable() {
         if (clientReadsBlocked) {
             clientReadsBlocked = false;
@@ -262,48 +260,19 @@ public class ProxyChannelStateMachine {
         }
     }
 
-    @VisibleForTesting
-    void allocateSessionId() {
-        this.sessionId = UUID.randomUUID().toString();
-    }
-
     /**
      * Notify the statemachine that the connection to the backend has started.
-     * @param peer the upstream host to connect to.
-     * @param virtualClusterModel the virtual cluster the client is connecting too
+     * @param upstreamEndpoints to connect to
      */
-    void onInitiateConnect(
-                           HostPort peer,
-                           VirtualClusterModel virtualClusterModel) {
+    void onInitiateConnect(Channel inboundChannel, List<UpstreamEndpoint> upstreamEndpoints) {
         if (state instanceof ProxyChannelState.SelectingServer selectingServerState) {
-            toConnecting(selectingServerState.toConnecting(peer), virtualClusterModel);
+            toConnecting(inboundChannel, selectingServerState.toConnecting(upstreamEndpoints));
         }
         else {
             illegalState(DUPLICATE_INITIATE_CONNECT_ERROR);
         }
     }
 
-    /**
-     * Notify the statemachine that the upstream connection is ready for RPC calls.
-     */
-    void onServerActive() {
-        if (state() instanceof ProxyChannelState.Connecting connectedState) {
-            toForwarding(connectedState.toForwarding());
-        }
-        else {
-            illegalState("Server became active while not in the connecting state");
-        }
-    }
-
-    /**
-     * <p>Notify the state machine of an unexpected event.
-     * The definition of unexpected events is up to the callers.
-     * An example would be trying to forward an event upstream before the upstream connection is established.
-     * </p>
-     * <p>illegalState implies termination of the proxy session. As this really represents a programming error NO error messages are propagated to clients.</p>
-     *
-     * @param msg the message to be <em>logged</em> in explanation of the error condition
-     */
     void illegalState(String msg) {
         if (!(state instanceof Closed)) {
             LOGGER.error("Unexpected event while in {} message: {}, closing channels with no client response.", state, msg);
@@ -311,35 +280,9 @@ public class ProxyChannelStateMachine {
         }
     }
 
-    /**
-     * A message has been received from the upstream node which should be passed to the downstream client
-     * @param msg the object received from the upstream
-     */
-    void messageFromServer(Object msg) {
-        Objects.requireNonNull(frontendHandler).forwardToClient(msg);
-    }
-
-    /**
-     * Called to notify the state machine that reading the upstream batch is complete.
-     */
-    void serverReadComplete() {
-        Objects.requireNonNull(frontendHandler).flushToClient();
-    }
-
-    /**
-     * A message has been received from the downstream client which should be passed to the upstream node
-     * @param msg the RPC received from the upstream
-     */
-    void messageFromClient(Object msg) {
-        Objects.requireNonNull(backendHandler).forwardToServer(msg);
-    }
-
-    /**
-     * Called to notify the state machine that reading the downstream the batch is complete.
-     */
     void clientReadComplete() {
-        if (state instanceof Forwarding) {
-            Objects.requireNonNull(backendHandler).flushToServer();
+        if (state instanceof ProxyChannelState.Forwarding) {
+            flushToBackends();
         }
     }
 
@@ -347,76 +290,68 @@ public class ProxyChannelStateMachine {
      * The proxy has received something from the client. The current state of the session determines what happens to it.
      * @param msg the RPC received from the downstream client
      */
-    void onClientRequest(
-                         Object msg) {
+    void onClientRequest(Object msg) {
         Objects.requireNonNull(frontendHandler);
-        if (state() instanceof Forwarding) { // post-backend connection
+        if (state() instanceof ProxyChannelState.Forwarding) { // post-backend connection
             messageFromClient(msg);
         }
-        else if (!onClientRequestBeforeForwarding(msg)) {
-            illegalState("Unexpected message received: " + (msg == null ? "null" : "message class=" + msg.getClass()));
+        else {
+            handleMessageBeforeForwarding(msg);
+        }
+    }
+
+    void messageFromClient(Object msg) {
+        if (state instanceof ProxyChannelState.Forwarding) {
+            forwardToUpstreams(msg);
         }
     }
 
     /**
-     * ensure the state machine is in the selecting server state.
+     * on first client read, the state machine transitions as follows:
+     * 1. msg is {@link HAProxyMessage} => clientActive -> haProxy -> selectingServer
+     * 2. msg is ApiVersions request => clientActive -> selectingServer
      *
-     * @return the SelectingServer state
-     * @throws IllegalStateException if the state is not {@link ProxyChannelState.SelectingServer}.
+     * Summary: the first request triggers the server selection and connection process.
+     * @param msg the RPC received from the downstream client
      */
-    ProxyChannelState.SelectingServer enforceInSelectingServer(String errorMessage) {
-        if (state instanceof ProxyChannelState.SelectingServer selectingServerState) {
-            return selectingServerState;
+    private void handleMessageBeforeForwarding(Object msg) {
+        Objects.requireNonNull(frontendHandler).bufferMsg(msg);
+        if (state instanceof ProxyChannelState.ClientActive clientActive) {
+            onClientRequestInClientActiveState(msg, clientActive);
+        }
+        else if (state instanceof ProxyChannelState.HaProxy haProxy) {
+            transitionClientRequest(msg, haProxy::toSelectingServer);
+        }
+
+        illegalState("Unexpected message received: " + "message class=" + msg.getClass());
+    }
+
+    private void onClientRequestInClientActiveState(Object msg, ProxyChannelState.ClientActive clientActive) {
+        if (msg instanceof HAProxyMessage haProxyMessage) {
+            toHaProxy(clientActive.toHaProxy(haProxyMessage));
         }
         else {
-            illegalState(errorMessage);
-            throw new IllegalStateException("State required to be "
-                    + ProxyChannelState.SelectingServer.class.getSimpleName()
-                    + " but was "
-                    + currentState()
-                    + ":"
-                    + errorMessage);
+            transitionClientRequest(msg, clientActive::toSelectingServer);
         }
     }
 
-    /**
-     * Notify the statemachine that the connection to the upstream node has been disconnected.
-     * <p>
-     * This will result in the proxy session being torn down.
-     * </p>
-     */
-    void onServerInactive() {
-        toClosed(null);
+    private void transitionClientRequest(
+            Object msg,
+            Function<DecodedRequestFrame<ApiVersionsRequestData>, ProxyChannelState.SelectingServer> selectingServerFactory) {
+        if (isApiVersionsRequest(msg)) {
+            // We know it's an API Versions request even if the compiler doesn't
+            @SuppressWarnings("unchecked")
+            DecodedRequestFrame<ApiVersionsRequestData> apiVersionsFrame = (DecodedRequestFrame<ApiVersionsRequestData>) msg;
+            toSelectingServer(selectingServerFactory.apply(apiVersionsFrame));
+        }
+        else if (msg instanceof RequestFrame) {
+            toSelectingServer(selectingServerFactory.apply(null));
+        }
+        else {
+            illegalState("Unexpected message type before forwarding: " + msg.getClass());
+        }
     }
 
-    /**
-     * Notify the statemachine that the connection to the downstream client has been disconnected.
-     * <p>
-     * This will result in the proxy session being torn down.
-     * </p>
-     */
-    void onClientInactive() {
-        toClosed(null);
-    }
-
-    /**
-     * Notify the state machine that something exceptional and un-recoverable has happened on the upstream side.
-     * @param cause the exception that triggered the issue
-     */
-    @SuppressWarnings("java:S5738")
-    void onServerException(@Nullable Throwable cause) {
-        LOGGER.atWarn()
-                .setCause(LOGGER.isDebugEnabled() ? cause : null)
-                .addArgument(cause != null ? cause.getMessage() : "")
-                .log("Exception from the server channel: {}. Increase log level to DEBUG for stacktrace");
-        proxyToServerErrorCounter.increment();
-        toClosed(cause);
-    }
-
-    /**
-     * Notify the state machine that something exceptional and un-recoverable has happened on the downstream side.
-     * @param cause the exception that triggered the issue
-     */
     @SuppressWarnings("java:S5738")
     void onClientException(@Nullable Throwable cause, boolean tlsEnabled) {
         ApiException errorCodeEx;
@@ -445,17 +380,56 @@ public class ProxyChannelStateMachine {
         toClosed(errorCodeEx);
     }
 
+    // ==================== Cluster Registration ====================
+
     /**
-     * @return Return the session ID which connects a frontend channel with a backend channel
+     * Register a cluster with explicit node ID offset.
+     *
+     * @param upstreamEndpoint service endpoint for this cluster
      */
+    void addServiceEndpoint(UpstreamEndpoint upstreamEndpoint) {
+        LOGGER.info("{}: Adding service endpoint {}", sessionId, upstreamEndpoint);
+        if (backends.containsKey(upstreamEndpoint)) {
+            throw new IllegalArgumentException("Cluster already registered: " + upstreamEndpoint.getHostPort());
+        }
+
+        if (serviceEndpoints.containsKey(upstreamEndpoint.targetCluster().name())) {
+            // throw exception that only one service endpoint per cluster is allowed
+            throw new IllegalArgumentException("Only one service endpoint per cluster is allowed: " + upstreamEndpoint.getHostPort());
+        }
+
+        Counter connectionCounter = Metrics.proxyToServerConnectionCounter(virtualClusterName, null).withTags();
+        Counter errorCounter = Metrics.proxyToServerErrorCounter(virtualClusterName, null).withTags();
+        Timer backpressureTimer = Metrics.serverToProxyBackpressureTimer(virtualClusterName, null).withTags();
+
+        BackendStateMachine backend = new BackendStateMachine(
+                upstreamEndpoint,
+                this,
+                socketFrameMaxSizeBytes,
+                logNetwork,
+                logFrames,
+                connectionCounter,
+                errorCounter,
+                backpressureTimer);
+
+        backends.put(upstreamEndpoint, backend);
+        serviceEndpoints.put(upstreamEndpoint.targetCluster().name(), upstreamEndpoint);
+    }
+
+    // ==================== Accessors ====================
+
     public String sessionId() {
         return Objects.requireNonNull(sessionId);
     }
 
+    public Set<String> clusterIds() {
+        return serviceEndpoints.keySet();
+    }
+
     @SuppressWarnings("java:S5738")
     private void toClientActive(
-                                ProxyChannelState.ClientActive clientActive,
-                                KafkaProxyFrontendHandler frontendHandler) {
+            ProxyChannelState.ClientActive clientActive,
+            KafkaProxyFrontendHandler frontendHandler) {
         setState(clientActive);
         frontendHandler.inClientActive();
 
@@ -464,79 +438,23 @@ public class ProxyChannelStateMachine {
     }
 
     @SuppressWarnings("java:S5738")
-    private void toConnecting(
-                              ProxyChannelState.Connecting connecting,
-                              VirtualClusterModel virtualClusterModel) {
+    private void toConnecting(Channel inboundChannel, ProxyChannelState.Connecting connecting) {
         setState(connecting);
-        backendHandler = new KafkaProxyBackendHandler(this, virtualClusterModel);
-        Objects.requireNonNull(frontendHandler).inConnecting(connecting.remote(), backendHandler);
-        proxyToServerConnectionCounter.increment();
-        LOGGER.atDebug()
-                .setMessage("{}: Upstream connection to {} established for client at {}:{}")
-                .addArgument(sessionId)
-                .addArgument(connecting.remote())
-                .addArgument(Objects.requireNonNull(this.frontendHandler).remoteHost())
-                .addArgument(this.frontendHandler.remotePort())
-                .log();
-    }
+        Objects.requireNonNull(frontendHandler).inConnecting();
+        connecting.upstreamEndpoints().forEach(this::addServiceEndpoint);
 
-    @SuppressWarnings("java:S5738")
-    private void toForwarding(Forwarding forwarding) {
-        setState(forwarding);
-        Objects.requireNonNull(frontendHandler).inForwarding();
-        proxyToServerConnectionToken.acquire();
-    }
-
-    /**
-     * handle a message received from the client prior to connecting to the upstream node
-     * @param msg Message received from the downstream client.
-     * @return <code>false</code> for unsupported message types
-     */
-    private boolean onClientRequestBeforeForwarding(Object msg) {
-        Objects.requireNonNull(frontendHandler).bufferMsg(msg);
-        if (state() instanceof ProxyChannelState.ClientActive clientActive) {
-            return onClientRequestInClientActiveState(msg, clientActive);
-        }
-        else if (state() instanceof ProxyChannelState.HaProxy haProxy) {
-            return onClientRequestInHaProxyState(msg, haProxy);
-        }
-        else if (state() instanceof ProxyChannelState.SelectingServer) {
-            return msg instanceof RequestFrame;
-        }
-        else {
-            return state() instanceof ProxyChannelState.Connecting && msg instanceof RequestFrame;
-        }
-    }
-
-    private boolean onClientRequestInHaProxyState(Object msg, ProxyChannelState.HaProxy haProxy) {
-        return transitionClientRequest(msg, haProxy::toSelectingServer);
-    }
-
-    private boolean transitionClientRequest(
-                                            Object msg,
-                                            Function<DecodedRequestFrame<ApiVersionsRequestData>, ProxyChannelState.SelectingServer> selectingServerFactory) {
-        if (isMessageApiVersionsRequest(msg)) {
-            // We know it's an API Versions request even if the compiler doesn't
-            @SuppressWarnings("unchecked")
-            DecodedRequestFrame<ApiVersionsRequestData> apiVersionsFrame = (DecodedRequestFrame<ApiVersionsRequestData>) msg;
-            toSelectingServer(selectingServerFactory.apply(apiVersionsFrame));
-            return true;
-        }
-        else if (msg instanceof RequestFrame) {
-            toSelectingServer(selectingServerFactory.apply(null));
-            return true;
-        }
-        return false;
-    }
-
-    private boolean onClientRequestInClientActiveState(Object msg, ProxyChannelState.ClientActive clientActive) {
-        if (msg instanceof HAProxyMessage haProxyMessage) {
-            toHaProxy(clientActive.toHaProxy(haProxyMessage));
-            return true;
-        }
-        else {
-            return transitionClientRequest(msg, clientActive::toSelectingServer);
-        }
+        // Connect all concurrently
+        Objects.requireNonNull(inboundChannel);
+        connectAll(inboundChannel)
+                .whenComplete((v, t) -> {
+                    if (t != null) {
+                        LOGGER.warn("{}: Error connecting to upstream clusters: {}", sessionId, t.getMessage());
+                        proxyToServerErrorCounter.increment();
+                        toClosed(t);
+                        return;
+                    }
+                    proxyToServerConnectionCounter.increment();
+                });
     }
 
     private void toHaProxy(ProxyChannelState.HaProxy haProxy) {
@@ -548,6 +466,347 @@ public class ProxyChannelStateMachine {
         Objects.requireNonNull(frontendHandler).inSelectingServer();
     }
 
+    private void toForwarding(ProxyChannelState.Forwarding forwarding) {
+        setState(forwarding);
+        Objects.requireNonNull(frontendHandler).inForwarding();
+        proxyToServerConnectionToken.acquire();
+    }
+
+    public Collection<BackendStateMachine> allBackends() {
+        return Collections.unmodifiableCollection(backends.values());
+    }
+
+    @Nullable
+    public BackendStateMachine getBackend(String clusterId) {
+        UpstreamEndpoint upstreamEndpoint = serviceEndpoints.get(clusterId);
+        return getBackend(upstreamEndpoint);
+    }
+
+    @Nullable
+    public BackendStateMachine getBackend(UpstreamEndpoint endpoint) {
+        return backends.getOrDefault(endpoint, null);
+    }
+
+    public boolean isMultiCluster() {
+        return backends.size() > 1;
+    }
+
+    public boolean isAnyConnected() {
+        return anyConnected;
+    }
+
+    public boolean areAllConnected() {
+        // no null value or not connected value means not all connected
+
+        if (backends.isEmpty()) {
+            return false;
+        }
+
+        var addedBackends = backends.values().stream().filter(Objects::nonNull);
+
+        if (addedBackends.count() != backends.size()) {
+            return false;
+        }
+
+        return addedBackends.allMatch(BackendStateMachine::isConnected);
+    }
+
+    /**
+     * Get all connected backends.
+     */
+    public List<BackendStateMachine> connectedBackends() {
+        return backends.values().stream()
+                .filter(BackendStateMachine::isConnected)
+                .collect(Collectors.toList());
+    }
+
+    // ==================== Connection Management (Internal) ====================
+
+    /**
+     * Connect to all registered clusters concurrently.
+     *
+     * @param inboundChannel client channel
+     * @return future that completes when ALL clusters are connected
+     */
+    public CompletableFuture<Void> connectAll(Channel inboundChannel) {
+
+        List<CompletableFuture<BackendStateMachine>> futures = new ArrayList<>();
+
+        for (BackendStateMachine backend : backends.values()) {
+            futures.add(backend.connect(inboundChannel));
+        }
+
+        return CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]));
+    }
+
+    // ==================== Request Forwarding ====================
+
+    /**
+     * Forward a message to the primary cluster.
+     */
+    public void forwardToUpstreams(Object msg) {
+        List<UpstreamEndpoint> msgTargets;
+        if (msg instanceof Frame frame) {
+            msgTargets = binding.upstreamServiceEndpoints(ApiKeys.forId(frame.apiKeyId()));
+            if (!aggregationCorrelationManager.containsKey(frame.correlationId())) {
+                aggregationCorrelationManager.put(frame.correlationId(), new ResponseAggregationContext<>(msgTargets.size(), this.reconciler));
+            }
+        }
+        else {
+            // todo: do we need to handle non-Frame messages here? should we introduce default endpoint in binding?
+            throw new IllegalArgumentException("Invalid message type: " + msg.getClass());
+        }
+
+        List<BackendStateMachine> msgBackends = msgTargets.stream()
+                .map(this::getBackend).toList();
+        // if any backend is null, we have an unknown cluster
+        if (msgBackends.stream().anyMatch(Objects::isNull)) {
+            throw new IllegalArgumentException("Unknown cluster for message: " + msg);
+        }
+
+        // there may be fewer backends required for a message than total backends
+        boolean allConnected = msgBackends.stream().allMatch(BackendStateMachine::isConnected);
+
+        if (!allConnected) {
+            // todo: should we wait for connections to complete instead?
+            throw new IllegalStateException("Not all backends connected for message: " + msg);
+        }
+
+        msgBackends.forEach(backend -> {
+            if (backend == null) { // this should never happen
+                throw new IllegalArgumentException("Unknown cluster for message: " + msg);
+            }
+
+            if (!backend.isConnected()) {
+                throw new IllegalStateException("backend not connected for cluster: " + backend.clusterId());
+            }
+
+            backend.forwardToServer(msg);
+        });
+    }
+
+    /**
+     * Forward a message to a specific cluster.
+     */
+    public void forwardToUpstream(String clusterId, Object msg) {
+        BackendStateMachine backend = getBackend(clusterId);
+        if (backend == null) {
+            throw new IllegalArgumentException("Unknown cluster: " + clusterId);
+        }
+        if (!backend.isConnected()) {
+            throw new IllegalStateException("Cluster not connected: " + clusterId);
+        }
+        backend.forwardToServer(msg);
+    }
+
+    /**
+     * Flush pending writes on all connected backends.
+     */
+    public void flushToBackends() {
+        for (BackendStateMachine backend : backends.values()) {
+            if (backend.isConnected()) {
+                backend.flushToServer();
+            }
+        }
+    }
+
+    // ==================== Backpressure Management ====================
+
+    /**
+     * Client is slow, apply backpressure to backends.
+     */
+    public void onClientUnwritable() {
+        applyBackpressureToAll();
+    }
+
+    /**
+     * Client caught up, relieve backend backpressure.
+     */
+    public void onClientWritable() {
+        if (serverReadsBlocked) {
+            serverReadsBlocked = false;
+            if (serverBackpressureTimer != null) {
+                serverBackpressureTimer.stop(serverToProxyBackpressureMeter);
+                serverBackpressureTimer = null;
+            }
+            relieveBackpressureFromAll();
+        }
+    }
+
+    void onClientInactive() {
+        toClosed(null);
+    }
+
+    /**
+     * Apply backpressure to all backends (client is slow).
+     */
+    public void applyBackpressureToAll() {
+        // todo: if serverReadsBlocked, no need to apply backpressure yet
+        for (BackendStateMachine backend : backends.values()) {
+            if (backend.isConnected()) {
+                backend.applyBackpressure();
+            }
+        }
+    }
+
+    /**
+     * Relieve backpressure on all backends (client caught up).
+     */
+    public void relieveBackpressureFromAll() {
+        for (BackendStateMachine backend : backends.values()) {
+            if (backend.isConnected()) {
+                backend.relieveBackpressure();
+            }
+        }
+    }
+
+    // ==================== Callbacks from BackendStateMachine ====================
+
+    void onBackendConnected(BackendStateMachine backend) {
+
+        LOGGER.atDebug()
+                .setMessage("{}: Upstream connection to {} established for client at {}:{}. Total Upstreams connected: {}/{}")
+                .addArgument(sessionId)
+                .addArgument(backend.endpoint().host())
+                .addArgument(Objects.requireNonNull(this.frontendHandler).remoteHost())
+                .addArgument(this.frontendHandler.remotePort())
+                .addArgument(connectedBackendCount())
+                .addArgument(backends.size())
+                .log();
+
+        this.anyConnected = true;
+
+        // if all backends are connected, notify session state machine
+        if (areAllConnected()) {
+            if (state() instanceof ProxyChannelState.Connecting connectedState) {
+                toForwarding(connectedState.toForwarding());
+            }
+            else {
+                illegalState("Server became active while not in the connecting state");
+            }
+        }
+    }
+
+    void onBackendFailed(BackendStateMachine backend, Throwable cause) {
+        LOGGER.warn("{}: Backend failed: {} - {}", sessionId, backend.endpoint().host(), cause.getMessage());
+        toClosed(cause);
+    }
+
+    void onBackendClosed(BackendStateMachine backend) {
+        LOGGER.debug("{}: Backend closed: {}", sessionId, backend.clusterId());
+
+        // Update anyConnected status
+        this.anyConnected = backends.values().stream()
+                .anyMatch(BackendStateMachine::isConnected);
+
+        // todo: should we close the client connection when a backend closes or only if all backends close?
+        toClosed(null);
+    }
+
+    void onBackendError(BackendStateMachine backend, Throwable cause) {
+        LOGGER.warn("{}: Backend error: {} - {}", sessionId, backend.clusterId(), cause.getMessage());
+        toClosed(cause);
+    }
+
+    void onBackendResponse(BackendStateMachine backend, Object msg) {
+        // Forward response to session state machine which routes to frontend
+        // aggregate responses based on correlation counter
+        // todo: to ensure decoded response, the correlation manager should say decodeResponse=true for aggregated requests
+        if (msg instanceof DecodedResponseFrame<?> frame) {
+            ResponseAggregationContext aggContext = aggregationCorrelationManager.get(frame.correlationId());
+            aggContext.addMessage(backend.targetCluster(), frame);
+            int remaining = aggContext.remainingResponses();
+            LOGGER.debug("{}: Received response for correlationId {}. Remaining: {}",
+                    sessionId, frame.correlationId(), remaining);
+            if (remaining > 0) {
+                LOGGER.debug("{}: Waiting for more responses for correlationId {}. Remaining: {}",
+                        sessionId, frame.correlationId(), remaining);
+                return;
+            }
+
+            aggregationCorrelationManager.remove(frame.correlationId());
+
+            LOGGER.debug("{}: All responses received for correlationId {}. Forwarding to session.",
+                    sessionId, frame.correlationId());
+
+            ApiMessageAggregator<?> aggregator = router().aggregator(frame.apiKey());
+            if (aggregator != null) {
+                aggregator.aggregate(aggContext).whenComplete((aggregatedResponse, throwable) -> {
+                    if (throwable != null) {
+                        // todo: better error handling
+                        LOGGER.error("{}: Error aggregating responses for correlationId {}: {}",
+                                sessionId, frame.correlationId(), ((Throwable) throwable).getMessage());
+                    }
+                    else {
+                        var aggregatedMsg = new DecodedResponseFrame<>(
+                                frame.apiVersion(),
+                                frame.correlationId(),
+                                frame.header(),
+                                (ApiMessage) aggregatedResponse);
+                        LOGGER.debug("{}: Aggregated response for correlationId {} using {} aggregator.",
+                                sessionId, frame.correlationId(), aggregator.getClass().getSimpleName());
+                        Objects.requireNonNull(frontendHandler).forwardToClient(aggregatedMsg);
+                    }
+                });
+
+                return;
+            }
+            else {
+                LOGGER.debug("{}: No aggregator found for API key {}. Forwarding last response to session.",
+                        sessionId, frame.apiKey());
+            }
+        }
+        else {
+            LOGGER.debug("{}: Received non-frame response. Forwarding to session.", sessionId);
+            throw new IllegalArgumentException("Received non-frame response");
+        }
+        Objects.requireNonNull(frontendHandler).forwardToClient(msg);
+    }
+
+    void onBackendReadComplete(BackendStateMachine backend) {
+        Objects.requireNonNull(frontendHandler).flushToClient();
+    }
+
+    void onBackendWritable(BackendStateMachine backend) {
+        // Only relieve client backpressure when ALL connected backends are writable
+        if (!clientReadsBlocked) {
+            return;
+        }
+
+        boolean allBackendsWritable = allBackends().stream()
+                .filter(BackendStateMachine::isConnected)
+                .allMatch(BackendStateMachine::isChannelWritable);
+
+        if (allBackendsWritable) {
+            clientReadsBlocked = false;
+            if (clientBackpressureTimer != null) {
+                clientBackpressureTimer.stop(clientToProxyBackPressureMeter);
+                clientBackpressureTimer = null;
+            }
+            Objects.requireNonNull(frontendHandler).relieveBackpressure();
+        }
+    }
+
+    void onBackendUnwritable(BackendStateMachine backend) {
+        if (!clientReadsBlocked) {
+            clientReadsBlocked = true;
+            clientBackpressureTimer = Timer.start();
+            Objects.requireNonNull(frontendHandler).applyBackpressure();
+        }
+    }
+
+    // ==================== Cleanup ====================
+
+    /**
+     * Close all backend connections.
+     */
+    private void closeAllBackends() {
+        LOGGER.debug("{}: Closing all backends", sessionId);
+        for (BackendStateMachine backend : backends.values()) {
+            backend.close();
+        }
+    }
+
     private void toClosed(@Nullable Throwable errorCodeEx) {
         if (state instanceof Closed) {
             return;
@@ -555,10 +814,8 @@ public class ProxyChannelStateMachine {
 
         setState(new Closed());
         // Close the server connection
-        if (backendHandler != null) {
-            backendHandler.inClosed();
-            proxyToServerConnectionToken.release();
-        }
+        closeAllBackends();
+        // proxyToServerConnectionToken.release();
 
         // Close the client connection with any error code
         if (frontendHandler != null) { // Can be null if the error happens before clientActive (unlikely but possible)
@@ -572,7 +829,7 @@ public class ProxyChannelStateMachine {
         this.state = state;
     }
 
-    private static boolean isMessageApiVersionsRequest(Object msg) {
+    private static boolean isApiVersionsRequest(Object msg) {
         return msg instanceof DecodedRequestFrame
                 && ((DecodedRequestFrame<?>) msg).apiKey() == ApiKeys.API_VERSIONS;
     }

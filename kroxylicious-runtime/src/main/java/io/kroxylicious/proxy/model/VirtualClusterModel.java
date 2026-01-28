@@ -46,6 +46,8 @@ import io.kroxylicious.proxy.config.tls.TrustOptions;
 import io.kroxylicious.proxy.config.tls.TrustProvider;
 import io.kroxylicious.proxy.internal.filter.TopicNameCacheFilter;
 import io.kroxylicious.proxy.internal.net.EndpointGateway;
+import io.kroxylicious.proxy.internal.router.Router;
+import io.kroxylicious.proxy.internal.router.TopicRouter;
 import io.kroxylicious.proxy.internal.subject.DefaultTransportSubjectBuilderService;
 import io.kroxylicious.proxy.internal.util.StableKroxyliciousLinkGenerator;
 import io.kroxylicious.proxy.plugin.PluginConfigurationException;
@@ -55,6 +57,9 @@ import io.kroxylicious.proxy.tag.VisibleForTesting;
 
 import edu.umd.cs.findbugs.annotations.Nullable;
 
+/**
+ * VirtualClusterModel represents the runtime model of a virtual cluster as configured.
+ */
 @SuppressWarnings("OptionalUsedAsFieldOrParameterType")
 public class VirtualClusterModel {
 
@@ -63,7 +68,7 @@ public class VirtualClusterModel {
 
     private final String clusterName;
 
-    private final TargetCluster targetCluster;
+    private final List<TargetCluster> targetClusters;
 
     private final boolean logNetwork;
 
@@ -73,30 +78,30 @@ public class VirtualClusterModel {
 
     private final List<NamedFilterDefinition> filters;
 
-    private final Optional<SslContext> upstreamSslContext;
     private final CacheConfiguration topicNameCacheConfig;
+    private final Optional<SslContext> upstreamSslContext = Optional.empty();
     private final @Nullable TransportSubjectBuilderConfig transportSubjectBuilderConfig;
     // lazily initialize to delay statistics registration until after the meter registry has been configured
     @Nullable
     private TopicNameCacheFilter topicNameCacheFilter = null;
 
     public VirtualClusterModel(String clusterName,
-                               TargetCluster targetCluster,
+                               List<TargetCluster> targetClusters,
                                boolean logNetwork,
                                boolean logFrames,
                                List<NamedFilterDefinition> filters) {
-        this(clusterName, targetCluster, logNetwork, logFrames, filters, new CacheConfiguration(null, null, null), null);
+        this(clusterName, targetClusters, logNetwork, logFrames, filters, new CacheConfiguration(null, null, null), null);
     }
 
     public VirtualClusterModel(String clusterName,
-                               TargetCluster targetCluster,
+                               List<TargetCluster> targetClusters,
                                boolean logNetwork,
                                boolean logFrames,
                                List<NamedFilterDefinition> filters,
                                CacheConfiguration topicNameCacheConfig,
                                @Nullable TransportSubjectBuilderConfig transportSubjectBuilderConfig) {
         this.clusterName = Objects.requireNonNull(clusterName);
-        this.targetCluster = Objects.requireNonNull(targetCluster);
+        this.targetClusters = Objects.requireNonNull(targetClusters);
         this.logNetwork = logNetwork;
         this.logFrames = logFrames;
         this.filters = filters;
@@ -104,12 +109,12 @@ public class VirtualClusterModel {
         this.transportSubjectBuilderConfig = transportSubjectBuilderConfig;
 
         // TODO: https://github.com/kroxylicious/kroxylicious/issues/104 be prepared to reload the SslContext at runtime.
-        this.upstreamSslContext = buildUpstreamSslContext();
+        // this.upstreamSslContext = buildUpstreamSslContext();
     }
 
     public void logVirtualClusterSummary() {
-        var upstreamHostPort = targetCluster.bootstrapServersList();
-        var upstreamTlsSummary = generateTlsSummary(targetCluster.tls());
+        var upstreamHostPort = targetClusters.stream().map(TargetCluster::toString).collect(Collectors.joining(", "));
+        var upstreamTlsSummary = generateTlsSummary(targetClusters);
 
         LOGGER.info("Virtual Cluster '{}' - gateway summary", clusterName);
 
@@ -120,6 +125,28 @@ public class VirtualClusterModel {
             LOGGER.info("Gateway: {}, Downstream {}{} => Upstream {}{}",
                     name, downstreamBootstrap, downstreamTlsSummary, upstreamHostPort, upstreamTlsSummary);
         });
+    }
+
+    private static String generateTlsSummary(List<TargetCluster> targetClusters) {
+        if (targetClusters.size() == 1) {
+            return generateTlsSummary(targetClusters.get(0).tls());
+        }
+        else {
+            var summaries = targetClusters.stream()
+                    .map(tc -> generateTlsSummary(tc.tls()))
+                    .filter(s -> !s.isBlank())
+                    .distinct()
+                    .toList();
+            if (summaries.size() == 1) {
+                return summaries.get(0);
+            }
+            else if (summaries.isEmpty()) {
+                return "";
+            }
+            else {
+                return " (TLS: multiple configurations) ";
+            }
+        }
     }
 
     private static String generateTlsSummary(Optional<Tls> tlsToSummarize) {
@@ -147,8 +174,8 @@ public class VirtualClusterModel {
         gateways.put(name, new VirtualClusterGatewayModel(this, nodeIdentificationStrategy, tls, name));
     }
 
-    public TargetCluster targetCluster() {
-        return targetCluster;
+    public List<TargetCluster> targetClusters() {
+        return targetClusters;
     }
 
     public String getClusterName() {
@@ -171,7 +198,7 @@ public class VirtualClusterModel {
     public String toString() {
         return "VirtualClusterModel{" +
                 "clusterName='" + clusterName + '\'' +
-                ", targetCluster=" + targetCluster +
+                ", targetClusters=" + targetClusters +
                 ", gateways=" + gateways +
                 ", logNetwork=" + logNetwork +
                 ", logFrames=" + logFrames +
@@ -179,8 +206,8 @@ public class VirtualClusterModel {
                 '}';
     }
 
-    public Optional<SslContext> getUpstreamSslContext() {
-        return upstreamSslContext;
+    public Optional<SslContext> getUpstreamSslContext(TargetCluster targetCluster) {
+        return buildUpstreamSslContext(targetCluster);
     }
 
     private static NettyTrustProvider configureTrustProvider(Tls tlsConfiguration) {
@@ -188,8 +215,14 @@ public class VirtualClusterModel {
         return new NettyTrustProvider(trustProvider);
     }
 
-    private Optional<SslContext> buildUpstreamSslContext() {
-        return targetCluster.tls().map(targetClusterTls -> {
+    // default upstream ssl context
+    private static Optional<SslContext> buildUpstreamSslContext(TargetCluster targetCluster) {
+        return buildUpstreamSslContext(targetCluster.tls());
+    }
+
+    // todo: better to move to TargetCluster or some tls utility class?
+    public static Optional<SslContext> buildUpstreamSslContext(Optional<Tls> tls) {
+        return tls.map(targetClusterTls -> {
             try {
                 var sslContextBuilder = Optional.ofNullable(targetClusterTls.key()).map(NettyKeyProvider::new).map(NettyKeyProvider::forClient)
                         .orElse(SslContextBuilder.forClient());
@@ -319,6 +352,7 @@ public class VirtualClusterModel {
         private final Optional<Tls> tls;
         private final Optional<SslContext> downstreamSslContext;
         private final String name;
+        private final Router router;
 
         @VisibleForTesting
         VirtualClusterGatewayModel(VirtualClusterModel virtualCluster, NodeIdentificationStrategy nodeIdentificationStrategy, Optional<Tls> tls, String name) {
@@ -329,6 +363,7 @@ public class VirtualClusterModel {
             validatePortUsage(nodeIdentificationStrategy);
             validateTLsSettings(nodeIdentificationStrategy, tls);
             this.downstreamSslContext = buildDownstreamSslContext();
+            this.router = new TopicRouter(virtualCluster, this);
         }
 
         private void validatePortUsage(NodeIdentificationStrategy nodeIdentificationStrategy) {
@@ -365,8 +400,8 @@ public class VirtualClusterModel {
         }
 
         @Override
-        public TargetCluster targetCluster() {
-            return virtualCluster.targetCluster();
+        public List<TargetCluster> targetClusters() {
+            return virtualCluster.targetClusters();
         }
 
         @Override
@@ -449,6 +484,11 @@ public class VirtualClusterModel {
                     throw new UncheckedIOException(e);
                 }
             });
+        }
+
+        @Override
+        public Router router() {
+            return router;
         }
 
         @Override

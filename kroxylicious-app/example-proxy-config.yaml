@@ -16,6 +16,10 @@ virtualClusters:
     - name: mygateway
       portIdentifiesNode:
         bootstrapAddress: localhost:9192
+        nodeIdRanges:
+          - name: default
+            start: 0
+            end: 5
     logNetwork: false
     logFrames: false
 filterDefinitions:

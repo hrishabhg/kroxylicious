@@ -66,7 +66,7 @@ public class BrokerAddressFilter implements MetadataResponseFilter, FindCoordina
             apply(context, broker, MetadataResponseBroker::nodeId, MetadataResponseBroker::host, MetadataResponseBroker::port, MetadataResponseBroker::setHost,
                     MetadataResponseBroker::setPort);
         }
-        return doReconcileThenForwardResponse(header, data, context, nodeMap);
+        return doReconcileThenForwardResponse(header, data, context, Map.of(0, nodeMap));
     }
 
     @Override
@@ -78,7 +78,7 @@ public class BrokerAddressFilter implements MetadataResponseFilter, FindCoordina
             apply(context, broker, DescribeClusterBroker::brokerId, DescribeClusterBroker::host, DescribeClusterBroker::port, DescribeClusterBroker::setHost,
                     DescribeClusterBroker::setPort);
         }
-        return doReconcileThenForwardResponse(header, data, context, nodeMap);
+        return doReconcileThenForwardResponse(header, data, context, Map.of(0, nodeMap));
     }
 
     @Override
@@ -174,7 +174,7 @@ public class BrokerAddressFilter implements MetadataResponseFilter, FindCoordina
     }
 
     private CompletionStage<ResponseFilterResult> doReconcileThenForwardResponse(ResponseHeaderData header, ApiMessage data, FilterContext context,
-                                                                                 Map<Integer, HostPort> nodeMap) {
+                                                                                 Map<Integer, Map<Integer, HostPort>> nodeMap) {
         return reconciler.reconcile(listenerModel, nodeMap).toCompletableFuture()
                 .thenCompose(u -> {
                     LOGGER.debug("Endpoint reconciliation complete for virtual cluster {}", listenerModel);

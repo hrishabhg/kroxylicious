@@ -148,7 +148,7 @@ class ProxyChannelStateMachineTest {
         givenState.run();
 
         // When
-        proxyChannelStateMachine.onServerException(failure);
+        proxyChannelStateMachine.onBackendError(mock(BackendStateMachine.class), failure);
 
         // Then
         assertThat(Metrics.globalRegistry.get("kroxylicious_proxy_to_server_errors").counter())

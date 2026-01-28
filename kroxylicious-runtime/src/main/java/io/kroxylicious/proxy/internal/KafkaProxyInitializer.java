@@ -174,7 +174,7 @@ public class KafkaProxyInitializer extends ChannelInitializer<Channel> {
             pipeline.addLast("networkLogger", new LoggingHandler("io.kroxylicious.proxy.internal.DownstreamNetworkLogger", LogLevel.INFO));
         }
 
-        ProxyChannelStateMachine proxyChannelStateMachine = new ProxyChannelStateMachine(virtualCluster.getClusterName(), binding.nodeId());
+        ProxyChannelStateMachine proxyChannelStateMachine = new ProxyChannelStateMachine(binding, endpointReconciler);
 
         // TODO https://github.com/kroxylicious/kroxylicious/issues/287 this is in the wrong place, proxy protocol comes over the wire first (so before SSL handler).
         if (haproxyProtocol) {
@@ -220,7 +220,7 @@ public class KafkaProxyInitializer extends ChannelInitializer<Channel> {
 
     private KafkaMessageListener buildMetricsMessageListenerForDecode(EndpointBinding binding, VirtualClusterModel virtualCluster) {
         var clusterName = virtualCluster.getClusterName();
-        var nodeId = binding.nodeId();
+        var nodeId = binding.virtualNodeId();
         var clientToProxyMessageCounterProvider = Metrics.clientToProxyMessageCounterProvider(clusterName, nodeId);
         var clientToProxyMessageSizeDistributionProvider = Metrics.clientToProxyMessageSizeDistributionProvider(clusterName, nodeId);
 
@@ -229,7 +229,7 @@ public class KafkaProxyInitializer extends ChannelInitializer<Channel> {
 
     private static MetricEmittingKafkaMessageListener buildMetricsMessageListenerForEncode(EndpointBinding binding, VirtualClusterModel virtualCluster) {
         var clusterName = virtualCluster.getClusterName();
-        var nodeId = binding.nodeId();
+        var nodeId = binding.virtualNodeId();
         var proxyToClientMessageCounterProvider = Metrics.proxyToClientMessageCounterProvider(clusterName, nodeId);
         var proxyToClientMessageSizeDistributionProvider = Metrics.proxyToClientMessageSizeDistributionProvider(clusterName, nodeId);
         return new MetricEmittingKafkaMessageListener(proxyToClientMessageCounterProvider,

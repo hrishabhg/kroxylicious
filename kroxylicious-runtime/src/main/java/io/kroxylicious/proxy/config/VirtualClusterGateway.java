@@ -25,6 +25,7 @@ import edu.umd.cs.findbugs.annotations.Nullable;
  * @param tls tls settings
  */
 public record VirtualClusterGateway(@JsonProperty(required = true) String name,
+                                    @JsonProperty(required = true) RouterDefinition router,
                                     @Nullable @JsonProperty(required = false) PortIdentifiesNodeIdentificationStrategy portIdentifiesNode,
                                     @Nullable @JsonProperty(required = false) SniHostIdentifiesNodeIdentificationStrategy sniHostIdentifiesNode,
                                     Optional<Tls> tls) {

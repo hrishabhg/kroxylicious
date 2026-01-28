@@ -6,6 +6,7 @@
 
 package io.kroxylicious.proxy.internal.net;
 
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -13,6 +14,7 @@ import java.util.Set;
 import io.netty.handler.ssl.SslContext;
 
 import io.kroxylicious.proxy.config.TargetCluster;
+import io.kroxylicious.proxy.internal.router.Router;
 import io.kroxylicious.proxy.model.VirtualClusterModel;
 import io.kroxylicious.proxy.service.HostPort;
 
@@ -26,7 +28,7 @@ public interface EndpointGateway {
      * Target cluster associated with this listener.
      * @return target cluster
      */
-    TargetCluster targetCluster();
+    List<TargetCluster> targetClusters();
 
     /**
      * true if this listener uses TLS.
@@ -111,4 +113,9 @@ public interface EndpointGateway {
      */
     String name();
 
+    /**
+     * Get the router for this gateway
+     * @return router
+     */
+    Router router();
 }

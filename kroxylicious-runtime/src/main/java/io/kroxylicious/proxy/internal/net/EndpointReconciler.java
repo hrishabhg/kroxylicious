@@ -18,9 +18,9 @@ public interface EndpointReconciler {
      * current set of nodes for this virtual cluster.  Once any necessary alterations to the
      * endpoint bindings have been realised, the returned CompletionStage will be completed.
      *
-     * @param virtualClusterModel virtual cluster
-     * @param upstreamNodes  current set of node ids
+     * @param endpointGateway virtual cluster
+     * @param upstreamNodeMap  current set of node ids for each target cluster in the virtual cluster
      * @return CompletionStage that is used to signal completion of the work.
      */
-    CompletionStage<Void> reconcile(EndpointGateway virtualClusterModel, Map<Integer, HostPort> upstreamNodes);
+    CompletionStage<Void> reconcile(EndpointGateway endpointGateway, Map<Integer, Map<Integer, HostPort>> upstreamNodeMap);
 }

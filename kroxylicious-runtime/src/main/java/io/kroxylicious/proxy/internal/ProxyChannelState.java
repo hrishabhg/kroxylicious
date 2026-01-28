@@ -6,6 +6,7 @@
 
 package io.kroxylicious.proxy.internal;
 
+import java.util.List;
 import java.util.Objects;
 
 import org.apache.kafka.common.message.ApiVersionsRequestData;
@@ -13,7 +14,7 @@ import org.apache.kafka.common.message.ApiVersionsRequestData;
 import io.netty.handler.codec.haproxy.HAProxyMessage;
 
 import io.kroxylicious.proxy.frame.DecodedRequestFrame;
-import io.kroxylicious.proxy.service.HostPort;
+import io.kroxylicious.proxy.service.UpstreamEndpoint;
 
 import edu.umd.cs.findbugs.annotations.Nullable;
 
@@ -33,7 +34,7 @@ sealed interface ProxyChannelState permits
         ClientActive,
         HaProxy,
         SelectingServer,
-        Connecting,
+        Connecting, // connecting to one/many service endpoints
         Forwarding,
         Closed {
 
@@ -109,9 +110,8 @@ sealed interface ProxyChannelState permits
          * Transition to {@link Connecting}
          * @return The Connecting state
          */
-        public Connecting toConnecting(HostPort remote) {
-            return new Connecting(haProxyMessage, clientSoftwareName,
-                    clientSoftwareVersion, remote);
+        public Connecting toConnecting(List<UpstreamEndpoint> upstreamEndpoints) {
+            return new Connecting(haProxyMessage, clientSoftwareName, clientSoftwareVersion, upstreamEndpoints);
         }
     }
 
@@ -121,12 +121,11 @@ sealed interface ProxyChannelState permits
      * @param haProxyMessage
      * @param clientSoftwareName
      * @param clientSoftwareVersion
-     * @param remote
      */
     record Connecting(@Nullable HAProxyMessage haProxyMessage,
                       @Nullable String clientSoftwareName,
                       @Nullable String clientSoftwareVersion,
-                      HostPort remote)
+                      List<UpstreamEndpoint> upstreamEndpoints)
             implements ProxyChannelState {
 
         /**

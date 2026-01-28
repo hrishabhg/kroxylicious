@@ -38,6 +38,7 @@ import io.kroxylicious.microbenchmarks.filters.FourInterfaceFilter2;
 import io.kroxylicious.microbenchmarks.filters.FourInterfaceFilter3;
 import io.kroxylicious.proxy.authentication.ClientSaslContext;
 import io.kroxylicious.proxy.authentication.Subject;
+import io.kroxylicious.proxy.config.tls.Tls;
 import io.kroxylicious.proxy.filter.ArrayFilterInvoker;
 import io.kroxylicious.proxy.filter.Filter;
 import io.kroxylicious.proxy.filter.FilterContext;
@@ -218,6 +219,21 @@ public class InvokerDispatchBenchmark {
         @Override
         public Subject authenticatedSubject() {
             return Subject.anonymous();
+        }
+
+        @Override
+        public void setTarget(String bootstrapServers, Tls tlsConfig) {
+
+        }
+
+        @Override
+        public Optional<Tls> targetTlsConfig() {
+            return Optional.empty();
+        }
+
+        @Override
+        public String targetBootstrapServers() {
+            return "";
         }
 
         @Override
