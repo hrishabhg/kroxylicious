@@ -42,7 +42,6 @@ import io.kroxylicious.proxy.internal.net.EndpointBinding;
 import io.kroxylicious.proxy.internal.net.EndpointReconciler;
 import io.kroxylicious.proxy.internal.router.ResponseAggregationContext;
 import io.kroxylicious.proxy.internal.router.Router;
-import io.kroxylicious.proxy.internal.router.TopicRouter;
 import io.kroxylicious.proxy.internal.router.aggregator.ApiMessageAggregator;
 import io.kroxylicious.proxy.internal.util.ActivationToken;
 import io.kroxylicious.proxy.internal.util.Metrics;
@@ -322,8 +321,9 @@ public class ProxyChannelStateMachine {
         else if (state instanceof ProxyChannelState.HaProxy haProxy) {
             transitionClientRequest(msg, haProxy::toSelectingServer);
         }
-
-        illegalState("Unexpected message received: " + "message class=" + msg.getClass());
+        else {
+            illegalState("Unexpected message received: " + "message class=" + msg.getClass());
+        }
     }
 
     private void onClientRequestInClientActiveState(Object msg, ProxyChannelState.ClientActive clientActive) {
@@ -502,13 +502,8 @@ public class ProxyChannelStateMachine {
             return false;
         }
 
-        var addedBackends = backends.values().stream().filter(Objects::nonNull);
-
-        if (addedBackends.count() != backends.size()) {
-            return false;
-        }
-
-        return addedBackends.allMatch(BackendStateMachine::isConnected);
+        return backends.values().stream()
+                .allMatch(b -> Objects.nonNull(b) && b.isConnected());
     }
 
     /**

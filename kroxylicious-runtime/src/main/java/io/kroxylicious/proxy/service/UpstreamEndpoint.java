@@ -13,4 +13,13 @@ public record UpstreamEndpoint(String host, int port, TargetCluster targetCluste
     public HostPort getHostPort() {
         return new HostPort(host, port);
     }
+
+    @Override
+    public String toString() {
+        return "UpstreamEndpoint{" +
+                "host='" + host + '\'' +
+                ", port=" + port +
+                ", targetCluster=" + targetCluster.name() +
+                '}';
+    }
 }
