@@ -199,11 +199,8 @@ public class BackendStateMachine {
             if (f.isSuccess()) {
                 LOGGER.trace("{}: TCP connected to {} for cluster {}",
                         proxyChannelStateMachine.sessionId(), target, clusterId);
-                // For non-TLS, transition to Connected immediately
-                // For TLS, wait for SslHandshakeCompletionEvent in handler
-                if (sslContext.isEmpty()) {
-                    onConnectionActive();
-                }
+                // For non-TLS, onConnectionActive() will be called from channelActive() in the handler
+                // For TLS, it will be called from userEventTriggered() after SslHandshakeCompletionEvent
             }
             else {
                 onConnectionFailed(f.cause());
@@ -275,7 +272,7 @@ public class BackendStateMachine {
      * Called from KafkaProxyBackendHandler.
      */
     public void onConnectionError(Throwable cause) {
-        LOGGER.warn("{}: Error on cluster {} connection: {}",
+        LOGGER.error("{}: Error on cluster {} connection: {}",
                 proxyChannelStateMachine.sessionId(), clusterId, cause.getMessage());
         errorCounter.increment();
 

@@ -31,6 +31,7 @@ import io.micrometer.core.instrument.Timer;
 import io.netty.channel.Channel;
 import io.netty.handler.codec.DecoderException;
 import io.netty.handler.codec.haproxy.HAProxyMessage;
+import io.netty.util.ReferenceCountUtil;
 
 import io.kroxylicious.proxy.frame.DecodedRequestFrame;
 import io.kroxylicious.proxy.frame.DecodedResponseFrame;
@@ -567,17 +568,37 @@ public class ProxyChannelStateMachine {
             throw new IllegalStateException("Not all backends connected for message: " + msg);
         }
 
-        msgBackends.forEach(backend -> {
-            if (backend == null) { // this should never happen
-                throw new IllegalArgumentException("Unknown cluster for message: " + msg);
-            }
+        // When sending to multiple backends, we need to retain the message for each
+        // additional backend. Netty's MessageToByteEncoder releases the message after
+        // encoding, so without retain() the second backend would get a released buffer.
+        int backendCount = msgBackends.size();
+        if (backendCount > 1) {
+            ReferenceCountUtil.retain(msg, backendCount - 1);
+        }
 
-            if (!backend.isConnected()) {
-                throw new IllegalStateException("backend not connected for cluster: " + backend.clusterId());
-            }
+        int sentCount = 0;
+        try {
+            for (BackendStateMachine backend : msgBackends) {
+                if (backend == null) { // this should never happen
+                    throw new IllegalArgumentException("Unknown cluster for message: " + msg);
+                }
 
-            backend.forwardToServer(msg);
-        });
+                if (!backend.isConnected()) {
+                    throw new IllegalStateException("backend not connected for cluster: " + backend.clusterId());
+                }
+
+                backend.forwardToServer(msg);
+                sentCount++;
+            }
+        }
+        catch (Exception e) {
+            // Release any unused retained references on error
+            int unusedRefs = backendCount - 1 - sentCount;
+            if (unusedRefs > 0) {
+                ReferenceCountUtil.release(msg, unusedRefs);
+            }
+            throw e;
+        }
     }
 
     /**
@@ -721,7 +742,7 @@ public class ProxyChannelStateMachine {
 
             aggregationCorrelationManager.remove(frame.correlationId());
 
-            LOGGER.debug("{}: All responses received for correlationId {}. Forwarding to session.",
+            LOGGER.debug("{}: All responses received for correlationId {}. Preparing aggregated response.",
                     sessionId, frame.correlationId());
 
             ApiMessageAggregator<?> aggregator = router().aggregator(frame.apiKey());
